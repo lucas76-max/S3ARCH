@@ -318,6 +318,7 @@ class FreeboxApi {
         val id = element.findAddedTaskId()
         if (id != null) {
             AppLog.info("Freebox", "Tache creee : $id")
+            requireTorrentTask(id)
             return@withContext id
         }
 
@@ -360,6 +361,7 @@ class FreeboxApi {
         val id = element.findAddedTaskId()
         if (id != null) {
             AppLog.info("Freebox", "Tache creee depuis le fichier : $id")
+            requireTorrentTask(id)
             return@withContext id
         }
         val latest = listTasks().maxByOrNull { it.id.toLongOrNull() ?: 0L }?.id
@@ -371,6 +373,36 @@ class FreeboxApi {
     suspend fun task(id: String): FreeboxTask? = withContext(Dispatchers.IO) {
         ensureSession()
         runCatching { authCall("/downloads/$id/", "GET", null).asTask() }.getOrNull()
+    }
+
+    /** Supprime une tache ; `erase` efface aussi les fichiers telecharges. */
+    suspend fun deleteTask(id: String, erase: Boolean = false): Unit = withContext(Dispatchers.IO) {
+        ensureSession()
+        authCall("/downloads/$id" + if (erase) "/erase" else "", "DELETE", null)
+        AppLog.info("Freebox", "Tache $id supprimee${if (erase) " (fichiers effaces)" else ""}")
+    }
+
+    /**
+     * Verifie que la tache creee est bien un torrent (`bt`).
+     *
+     * Si la Freebox a traite l'envoi comme un simple fichier, elle enregistre le .torrent dans
+     * le dossier sans jamais lancer le telechargement : la tache est alors supprimee et effacee.
+     */
+    private suspend fun requireTorrentTask(id: String): Unit {
+        val created = task(id) ?: return
+        AppLog.info(
+            "Freebox",
+            "Tache $id : type=${created.type.ifBlank { "?" }} statut=${created.status} nom=${created.name}",
+        )
+        if (created.type.isNotBlank() && created.type != "bt") {
+            AppLog.error("Freebox", "Tache ${created.type} au lieu d'un torrent : suppression de $id")
+            runCatching { deleteTask(id, erase = true) }
+            throw FreeboxException(
+                "La Freebox a enregistre le .torrent comme un fichier (${created.type}) " +
+                    "au lieu de lancer le torrent",
+                "not_bittorrent",
+            )
+        }
     }
 
     suspend fun listTasks(): List<FreeboxTask> = withContext(Dispatchers.IO) {
@@ -530,6 +562,7 @@ class FreeboxApi {
         return FreeboxTask(
             id = id,
             name = obj["name"]?.jsonPrimitive?.contentOrNull ?: "Torrent $id",
+            type = obj["type"]?.jsonPrimitive?.contentOrNull ?: "",
             status = obj["status"]?.jsonPrimitive?.contentOrNull ?: "queued",
             rxBytes = obj["rx_bytes"]?.jsonPrimitive?.longOrNull ?: 0L,
             totalBytes = obj["total_bytes"]?.jsonPrimitive?.longOrNull
@@ -582,7 +615,7 @@ class FreeboxApi {
     companion object {
         const val APP_ID = "com.s3arch.app"
         const val APP_NAME = "S3ARCH"
-        const val APP_VERSION = "1.4.0"
+        const val APP_VERSION = "1.5.0"
         const val DEFAULT_DIR = "/Disque dur/S3ARCH"
     }
 }
@@ -605,6 +638,7 @@ internal object SafeErrors {
         "disk_unavailable" -> "Le disque de la Freebox n'est pas monte"
         "access_denied" -> "Acces refuse a ce dossier par la Freebox"
         "bt_file_error" -> "La Freebox n'a pas pu ecrire le torrent dans le dossier de destination"
+        "not_bittorrent" -> "La Freebox a enregistre le .torrent comme un fichier au lieu de lancer le torrent"
         "exists" -> "Ce torrent est deja present dans la file Freebox"
         "hibernating" -> "Le gestionnaire de telechargement de la Freebox est en veille"
         else -> if (code.isNullOrBlank()) message else "$message ($code)"

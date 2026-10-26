@@ -220,11 +220,13 @@ class S3archViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /**
-     * Trois strategies, de la plus fiable a la plus permissive :
-     *  1. le telephone telecharge le .torrent et l'envoie en fichier a la Freebox ;
-     *  2. sinon on passe le lien au gestionnaire Freebox (http/https/ftp) ;
-     *  3. en dernier recours, le lien magnet.
-     * La Freebox refuse souvent les URL (`invalid_url`) : la voie fichier l'evite.
+     * Lance une vraie tache BitTorrent sur la Freebox :
+     *  1. le telephone recupere le .torrent et l'envoie en fichier (la box le transforme en torrent) ;
+     *  2. sinon, le lien magnet (la box cree directement une tache `bt`).
+     *
+     * L'URL du .torrent (`?t=get&id=…` chez C411/TR4KER) n'est JAMAIS transmise a la box :
+     * elle la traite comme un simple fichier et enregistre le .torrent dans le dossier sans
+     * lancer le telechargement.
      */
     private suspend fun launchDownload(result: TorrentResult, folder: String): String {
         val torrentUrl = result.downloadUrl.takeIf { DownloadUrls.isHttp(it) }
@@ -241,22 +243,16 @@ class S3archViewModel(app: Application) : AndroidViewModel(app) {
             AppLog.warn("Download", "Envoi du fichier .torrent impossible : ${lastError?.message}")
         }
 
-        val link = torrentUrl ?: magnet
-        if (link != null) {
-            val outcome = runCatching { freebox.addDownload(link, folder) }
-            outcome.getOrNull()?.let { return it }
-            lastError = outcome.exceptionOrNull() ?: lastError
-            AppLog.warn("Download", "Ajout par URL refuse : ${lastError?.message}")
-        }
-
-        if (magnet != null && magnet != link) {
+        if (magnet != null) {
             val outcome = runCatching { freebox.addDownload(magnet, folder) }
             outcome.getOrNull()?.let { return it }
             lastError = outcome.exceptionOrNull() ?: lastError
             AppLog.warn("Download", "Ajout par magnet refuse : ${lastError?.message}")
         }
 
-        throw lastError ?: FreeboxException("Aucun lien de téléchargement pour ce torrent")
+        throw lastError ?: FreeboxException(
+            "Aucun moyen de lancer le torrent : fichier .torrent indisponible et pas de lien magnet",
+        )
     }
 
     private fun torrentFileName(title: String): String {

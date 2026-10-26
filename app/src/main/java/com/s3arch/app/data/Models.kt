@@ -200,6 +200,8 @@ data class FreeboxBox(
 data class FreeboxTask(
     val id: String,
     val name: String,
+    /** `bt` pour un torrent, `http`/`ftp` pour un simple fichier. */
+    val type: String,
     val status: String,
     val rxBytes: Long,
     val totalBytes: Long,
