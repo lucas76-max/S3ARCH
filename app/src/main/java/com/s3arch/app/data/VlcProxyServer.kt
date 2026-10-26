@@ -22,19 +22,31 @@ import kotlin.concurrent.thread
  */
 class VlcProxyServer {
 
-    private data class Stream(val encodedPath: String, val name: String)
+    /**
+     * Fichier a relayer.
+     *
+     * [encodedPath] est le chemin Freebox en base64 (`/api/vX/dl/...`),
+     * [shareUrl] le lien de partage `btpreview` s'il existe (repli quand `/dl/`
+     * n'est pas accepte), [size] la taille connue du fichier.
+     */
+    data class StreamSource(
+        val encodedPath: String,
+        val name: String,
+        val size: Long = 0L,
+        val shareUrl: String? = null,
+    )
 
     @Volatile
     private var serverSocket: ServerSocket? = null
 
     @Volatile
-    private var opener: ((encodedPath: String, range: String?) -> Response)? = null
+    private var opener: ((StreamSource, String?) -> Response)? = null
 
-    private val streams = ConcurrentHashMap<String, Stream>()
+    private val streams = ConcurrentHashMap<String, StreamSource>()
 
     /** Demarre le proxy (si besoin) et renvoie le port local. */
     @Synchronized
-    fun start(openFile: (encodedPath: String, range: String?) -> Response): Int {
+    fun start(openFile: (StreamSource, String?) -> Response): Int {
         opener = openFile
         val existing = serverSocket
         if (existing != null && !existing.isClosed) return existing.localPort
@@ -65,13 +77,13 @@ class VlcProxyServer {
      * Enregistre un flux a relayer et renvoie le chemin local correspondant,
      * a concatener derriere `http://127.0.0.1:<port>`.
      */
-    fun publish(encodedPath: String, name: String): String {
+    fun publish(source: StreamSource): String {
         val token = UUID.randomUUID().toString().replace("-", "").take(20)
-        streams[token] = Stream(encodedPath, name)
+        streams[token] = source
         if (streams.size > 24) {
             streams.keys.firstOrNull { it != token }?.let { streams.remove(it) }
         }
-        return "/v/$token/${safeFileName(name)}"
+        return "/v/$token/${safeFileName(source.name)}"
     }
 
     fun urlFor(port: Int, localPath: String): String = "http://127.0.0.1:$port$localPath"
@@ -148,26 +160,36 @@ class VlcProxyServer {
                 }
 
                 val response = try {
-                    openFile(stream.encodedPath, range)
+                    openFile(stream, range)
                 } catch (e: Exception) {
                     writeError(client, 502, e.message ?: "Freebox injoignable")
                     return
                 }
 
-                response.use { upstream -> relay(client, upstream, stream.name, method) }
+                response.use { upstream -> relay(client, upstream, stream, method) }
             } catch (e: Exception) {
                 runCatching { writeError(client, 500, e.message ?: "Erreur du proxy") }
             }
         }
     }
 
-    private fun relay(socket: Socket, upstream: Response, name: String, method: String) {
+    private fun relay(socket: Socket, upstream: Response, source: StreamSource, method: String) {
         val out = BufferedOutputStream(socket.getOutputStream())
         val body = upstream.body
-        val contentType = upstream.header("Content-Type")?.takeIf { it.isNotBlank() }
-            ?: contentTypeFor(name)
+        val contentType = upstream.header("Content-Type")?.takeIf { it.isNotBlank() && !it.startsWith("text/html") }
+            ?: contentTypeFor(source.name)
         val contentRange = upstream.header("Content-Range")
-        val contentLength = body?.contentLength() ?: -1L
+
+        // Certains liens de partage repondent en chunked, sans Content-Length : VLC a
+        // alors besoin de la taille du fichier pour situer la lecture. On ne l'annonce
+        // que si la Freebox ne l'a pas deja fait et que la taille est connue et fiable,
+        // sinon une reponse plus courte que annonce ferait echouer le lecteur.
+        val upstreamLength = body?.contentLength() ?: -1L
+        val contentLength = when {
+            upstreamLength >= 0 -> upstreamLength
+            upstream.code == 200 && source.size > 0L -> source.size
+            else -> -1L
+        }
 
         val status = when {
             upstream.code == 416 -> "416 Range Not Satisfiable"

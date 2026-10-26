@@ -468,25 +468,27 @@ class FreeboxApi {
     }
 
     /**
-     * Flux direct d'un fichier de la Freebox (pour VLC). Bloquant : appele depuis le
-     * proxy local, jamais depuis le thread principal.
+     * Flux direct d'un fichier de la Freebox pour le proxy local. Bloquant : appele
+     * depuis le thread du proxy, jamais depuis le thread principal.
      *
-     * `/dl/{path base64}` est l'endpoint documente ; `/fs/download/?path=` sert de
-     * repli pour les firmwares qui ne l'exposent plus. Une session expiree (403) est
-     * renouvelee une fois avant de renoncer.
+     * Trois sources, de la plus fiable a la moins fiable :
+     *  1. `GET /api/vX/dl/{chemin base64}` : endpoint documente de l'API fichiers,
+     *     en **LAN**, authentifie, sans passer par l'acces distant de la box ;
+     *  2. le lien de partage `btpreview` (`preview_url`), qui fonctionne sans
+     *     authentification mais transite par l'acces distant HTTPS (`*.freeboxos.fr`,
+     *     port aleatoire) — c'est lui que VLC ne savait pas ouvrir ;
+     *  3. `GET /fs/download/?path=` pour les firmwares sans `/dl/`.
+     *
+     * Une session expiree (403) est renouvelee une fois. Chaque tentative est
+     * journalisee avec son code HTTP : plus de diagnostic a l'aveugle.
      */
-    fun openFileBlocking(encodedPath: String, range: String?): Response {
-        fun request(pathPrefix: String): Response {
+    fun openMediaBlocking(source: VlcProxyServer.StreamSource, range: String?): Response {
+        fun authRequest(build: (okhttp3.HttpUrl.Builder) -> Unit): Response {
             val base = baseUrl ?: throw FreeboxException("Freebox non connectee")
             val token = sessionToken ?: throw FreeboxException("Session Freebox absente")
             val parsed = base.toHttpUrlOrNull() ?: throw FreeboxException("URL Freebox invalide")
             val builder = parsed.newBuilder()
-            if (pathPrefix == "dl") {
-                builder.addPathSegment("dl").addPathSegment(encodedPath)
-            } else {
-                builder.addPathSegment("fs").addPathSegment("download")
-                    .addQueryParameter("path", encodedPath)
-            }
+            build(builder)
             val req = Request.Builder()
                 .url(builder.build())
                 .header("X-Fbx-App-Auth", token)
@@ -496,29 +498,63 @@ class FreeboxApi {
             return streamClient.newCall(req).execute()
         }
 
-        fun open(prefix: String, retried: Boolean): Response {
-            val response = request(prefix)
+        fun withRetry(name: String, retried: Boolean = false, call: () -> Response): Response {
+            val response = call()
+            val rangeInfo = response.header("Content-Range")?.let { " · $it" }.orEmpty()
             AppLog.info(
                 "Lecture",
-                "Flux /$prefix/ -> HTTP ${response.code} ${response.message}" +
-                    " (${response.header("Content-Type") ?: "type inconnu"})",
+                "Flux $name -> HTTP ${response.code} ${response.message}" +
+                    " (${response.header("Content-Type") ?: "type inconnu"}$rangeInfo)",
             )
             if (response.code == 403 && !retried) {
                 response.close()
+                AppLog.warn("Lecture", "Session refusee ($name), renouvellement puis nouvel essai")
                 runCatching { runBlocking { renewSession() } }
                     .onFailure { AppLog.warn("Lecture", "Renouvellement de session impossible : ${it.message}") }
-                return open(prefix, retried = true)
+                return withRetry(name, retried = true, call = call)
             }
             return response
         }
 
-        val primary = open("dl", retried = false)
-        if (primary.code == 404 || primary.code == 400) {
-            primary.close()
-            AppLog.warn("Lecture", "/dl/ refuse ce chemin, essai de /fs/download/")
-            return open("fs", retried = false)
+        fun usable(response: Response): Boolean = response.isSuccessful || response.code == 416
+
+        val failures = mutableListOf<String>()
+
+        run {
+            val dl = withRetry("/dl/") {
+                authRequest { it.addPathSegment("dl").addPathSegment(source.encodedPath) }
+            }
+            if (usable(dl)) return dl
+            failures += "/dl/ HTTP ${dl.code}"
+            dl.close()
         }
-        return primary
+
+        val share = source.shareUrl
+        if (!share.isNullOrBlank()) {
+            val response = withRetry("lien de partage") {
+                val request = Request.Builder()
+                    .url(share)
+                    .apply { if (!range.isNullOrBlank()) header("Range", range) }
+                    .get()
+                    .build()
+                streamClient.newCall(request).execute()
+            }
+            if (usable(response)) return response
+            failures += "lien de partage HTTP ${response.code}"
+            response.close()
+        }
+
+        val fs = withRetry("/fs/download/") {
+            authRequest {
+                it.addPathSegment("fs").addPathSegment("download")
+                    .addQueryParameter("path", source.encodedPath)
+            }
+        }
+        if (usable(fs)) return fs
+        failures += "/fs/download/ HTTP ${fs.code}"
+        fs.close()
+
+        throw FreeboxException("Lecture refusee par la Freebox (${failures.joinToString(", ")})")
     }
 
     // ------------------------------------------------------------------ HTTP interne
