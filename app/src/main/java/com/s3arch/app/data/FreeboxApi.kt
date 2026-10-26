@@ -1,6 +1,7 @@
 package com.s3arch.app.data
 
 import android.util.Base64
+import com.s3arch.app.data.vpn.VpnAddresses
 import com.s3arch.app.util.AppLog
 import com.s3arch.app.util.DownloadUrls
 import kotlinx.coroutines.Dispatchers
@@ -191,6 +192,21 @@ class FreeboxApi {
         baseUrl = "http://$cleanHost$normalizedBase"
         sessionToken = session
         AppLog.info("Freebox", "Session ouverte sur $cleanHost$normalizedBase")
+    }
+
+    /**
+     * Change l'adresse de la box sans rouvrir de session : en LAN on utilise le nom
+     * mDNS, hors du reseau local on passe par l'IP LAN a travers le tunnel VPN.
+     */
+    fun useHost(rawHost: String) {
+        val current = baseUrl ?: return
+        val host = runCatching { normalizeHost(rawHost) }.getOrNull()?.takeIf { it.isNotBlank() } ?: return
+        val path = current.substringAfter("//").substringAfter("/", "")
+        val updated = if (path.isBlank()) "http://$host" else "http://$host/$path"
+        if (updated != current) {
+            baseUrl = updated
+            AppLog.info("Freebox", "Adresse de la box : $host")
+        }
     }
 
     private suspend fun ensureSession() {
@@ -556,6 +572,103 @@ class FreeboxApi {
 
         throw FreeboxException("Lecture refusee par la Freebox (${failures.joinToString(", ")})")
     }
+
+    // ------------------------------------------------------------------ VPN WireGuard
+
+    /** Serveurs VPN de la box ; on ne s'interesse qu'au WireGuard. */
+    suspend fun vpnServers(): List<VpnServer> = withContext(Dispatchers.IO) {
+        ensureSession()
+        val result = runCatching { authCall("/vpn/", "GET", null) }.getOrNull()
+            ?: return@withContext emptyList()
+        (result as? JsonArray)?.mapNotNull { element ->
+            val obj = element as? JsonObject ?: return@mapNotNull null
+            val id = obj["name"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+            VpnServer(
+                id = id,
+                type = obj["type"]?.jsonPrimitive?.contentOrNull ?: "",
+                state = obj["state"]?.jsonPrimitive?.contentOrNull ?: "",
+            )
+        } ?: emptyList()
+    }
+
+    /** Active le serveur WireGuard (idempotent). */
+    suspend fun enableWireGuardServer(id: String): Unit = withContext(Dispatchers.IO) {
+        ensureSession()
+        authCall("/vpn/$id/config/", "PUT", buildJsonObject { put("enabled", true) })
+        AppLog.info("VPN", "Serveur WireGuard « $id » activé")
+    }
+
+    /** Plage d'adresses du pool VPN et reservations existantes. */
+    suspend fun vpnPool(): VpnPool = withContext(Dispatchers.IO) {
+        ensureSession()
+        val result = authCall("/vpn/ip_pool/", "GET", null).jsonObject
+        VpnPool(
+            start = result["ip_start"]?.jsonPrimitive?.contentOrNull.orEmpty(),
+            end = result["ip_end"]?.jsonPrimitive?.contentOrNull.orEmpty(),
+            reserved = (result["reservations"] as? JsonArray)
+                ?.mapNotNull { (it as? JsonObject)?.get("ip")?.jsonPrimitive?.contentOrNull }
+                ?.toSet()
+                .orEmpty(),
+        )
+    }
+
+    /** Cree l'utilisateur WireGuard dedie a l'application s'il n'existe pas deja. */
+    suspend fun ensureWireGuardUser(login: String): String = withContext(Dispatchers.IO) {
+        ensureSession()
+        val users = authCall("/vpn/user/", "GET", null) as? JsonArray
+        val existing = users?.mapNotNull { element ->
+            (element as? JsonObject)?.get("login")?.jsonPrimitive?.contentOrNull
+        }.orEmpty()
+        if (login in existing) return@withContext login
+
+        val pool = vpnPool()
+        val ip = VpnAddresses.nextFreeIp(pool.start, pool.end, pool.reserved)
+            ?: throw FreeboxException("Aucune adresse VPN libre sur la Freebox")
+        authCall(
+            "/vpn/user/",
+            "POST",
+            buildJsonObject {
+                put("login", login)
+                put("type", "wireguard")
+                put("ip_reservation", ip)
+            },
+        )
+        AppLog.info("VPN", "Utilisateur WireGuard « $login » créé ($ip)")
+        login
+    }
+
+    /** Telecharge la configuration wg-quick du client WireGuard (format `plain`). */
+    suspend fun wireGuardConfig(serverId: String, login: String): String = withContext(Dispatchers.IO) {
+        ensureSession()
+        val text = authText("/vpn/download_config/$serverId/$login/plain")
+        if (!text.contains("[Interface]", ignoreCase = true)) {
+            throw FreeboxException("Configuration WireGuard inattendue : ${text.take(120)}")
+        }
+        text
+    }
+
+    /** GET authentifie qui renvoie du texte brut (fichiers de configuration). */
+    private fun authText(path: String): String {
+        val base = baseUrl ?: throw FreeboxException("Freebox non connectee")
+        val token = sessionToken ?: throw FreeboxException("Session Freebox absente")
+        val request = Request.Builder()
+            .url(base + path)
+            .header("X-Fbx-App-Auth", token)
+            .get()
+            .build()
+        return streamClient.newCall(request).execute().use { response ->
+            val body = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                AppLog.error("Freebox", "HTTP ${response.code} sur $path : ${body.take(200)}")
+                throw FreeboxException("Configuration VPN refusée par la Freebox (HTTP ${response.code})")
+            }
+            body
+        }
+    }
+
+    data class VpnServer(val id: String, val type: String, val state: String)
+
+    data class VpnPool(val start: String, val end: String, val reserved: Set<String>)
 
     // ------------------------------------------------------------------ HTTP interne
 

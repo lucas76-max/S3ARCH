@@ -2,6 +2,7 @@ package com.s3arch.app.ui
 
 import android.app.Application
 import android.content.Context
+import android.content.Intent
 import android.util.Base64
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -21,6 +22,7 @@ import com.s3arch.app.data.TrackedDownload
 import com.s3arch.app.data.VlcProxyServer
 import com.s3arch.app.data.freeboxPath
 import com.s3arch.app.data.playableMedia
+import com.s3arch.app.data.vpn.VpnTunnel
 import com.s3arch.app.util.AppLog
 import com.s3arch.app.util.DownloadUrls
 import com.s3arch.app.ui.player.PlayerActivity
@@ -36,6 +38,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.net.InetAddress
+import java.net.InetSocketAddress
+import java.net.Socket
 
 enum class FreeboxStatus { Idle, Connecting, WaitingApproval, Connected, Error }
 
@@ -61,6 +66,11 @@ data class UiState(
     val actionIds: Set<String> = emptySet(),
     val setup: SetupState = SetupState(),
     val message: String? = null,
+    /** Autorisation Android du VPN a presenter (null si deja accordee). */
+    val vpnConsentIntent: Intent? = null,
+    val vpnBusy: Boolean = false,
+    /** Tunnel actuellement monte (hors du reseau local). */
+    val vpnActive: Boolean = false,
 )
 
 class S3archViewModel(app: Application) : AndroidViewModel(app) {
@@ -512,6 +522,7 @@ class S3archViewModel(app: Application) : AndroidViewModel(app) {
                 runCatching { freebox.ensureFolder(downloadDir) }
 
                 repo.saveFreebox(box.host, box.apiBase, box.apiVersion, token, downloadDir)
+                rememberLanIp(box.host)
                 _state.update {
                     it.copy(
                         setup = SetupState(
@@ -552,7 +563,166 @@ class S3archViewModel(app: Application) : AndroidViewModel(app) {
         if (!settings.freeboxConfigured) {
             throw FreeboxException("Connectez votre Freebox dans les réglages")
         }
-        freebox.connect(settings.freeboxHost, settings.freeboxApiBase, settings.freeboxAppToken)
+        // Hors du reseau local, l'adresse mDNS de la box ne resout pas : on monte le
+        // tunnel et on joint la box par son IP locale, qui passe par le VPN.
+        val host = withContext(Dispatchers.IO) {
+            val vpnReady = settings.vpnEnabled && settings.vpnConfig.isNotBlank()
+            if (vpnReady && settings.freeboxLanIp.isNotBlank() && !probeLan(settings.freeboxHost)) {
+                val app = getApplication<Application>()
+                if (!VpnTunnel.isUp(app)) VpnTunnel.up(app, settings.vpnConfig)
+                settings.freeboxLanIp
+            } else {
+                settings.freeboxHost
+            }
+        }
+        freebox.connect(host, settings.freeboxApiBase, settings.freeboxAppToken)
+    }
+
+    // ------------------------------------------------------------------ VPN
+
+    /**
+     * Cree la configuration VPN sur la Freebox puis demande l'autorisation Android.
+     *
+     * Cote box : activation du serveur WireGuard, creation d'un utilisateur dedie
+     * (`s3arch`) et telechargement de sa configuration wg-quick. Cote telephone :
+     * Android exige un accord explicite avant qu'une application puisse ouvrir un VPN,
+     * d'ou l'Intent renvoye a l'ecran.
+     */
+    fun enableVpn(context: Context) {
+        if (_state.value.vpnBusy) return
+        _state.update { it.copy(vpnBusy = true) }
+        viewModelScope.launch {
+            try {
+                ensureFreebox()
+                val settings = _state.value.settings
+                val config = withContext(Dispatchers.IO) { createVpnConfig(settings) }
+                repo.saveVpnConfig(config, settings.vpnLogin)
+                rememberLanIp(settings.freeboxHost)
+
+                val consent = VpnTunnel.consentIntent(context)
+                if (consent != null) {
+                    AppLog.info("VPN", "Autorisation Android demandée")
+                    _state.update { it.copy(vpnConsentIntent = consent, vpnBusy = false) }
+                } else {
+                    startTunnel(context, config)
+                }
+            } catch (e: Exception) {
+                AppLog.throwable("VPN", "Creation du VPN impossible", e)
+                _state.update { it.copy(vpnBusy = false) }
+                message(e.message?.takeIf { it.isNotBlank() } ?: "Création du VPN impossible")
+            }
+        }
+    }
+
+    /** Reponse a la demande d'autorisation Android (« autoriser une connexion VPN »). */
+    fun onVpnConsentResult(context: Context, granted: Boolean) {
+        _state.update { it.copy(vpnConsentIntent = null) }
+        if (!granted) {
+            AppLog.warn("VPN", "Autorisation Android refusée")
+            message("VPN non activé : Android a refusé la connexion")
+            return
+        }
+        viewModelScope.launch {
+            startTunnel(context, _state.value.settings.vpnConfig)
+        }
+    }
+
+    /** Desactive le VPN (le tunnel est coupe, la configuration reste enregistree). */
+    fun disableVpn(context: Context) {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { VpnTunnel.down(context) }
+            repo.setVpnEnabled(false)
+            _state.update { it.copy(vpnActive = false) }
+            message("VPN désactivé")
+        }
+    }
+
+    fun dismissVpnPrompt() {
+        viewModelScope.launch { repo.dismissVpnPrompt() }
+    }
+
+    /**
+     * Au lancement et au retour au premier plan : on garde le reseau local s'il repond,
+     * sinon on monte le tunnel et on adresse les appels a l'IP LAN de la box.
+     */
+    fun applyNetworkMode() {
+        val settings = _state.value.settings
+        if (!settings.vpnEnabled || settings.vpnConfig.isBlank() || _state.value.vpnBusy) return
+        viewModelScope.launch { withContext(Dispatchers.IO) { syncNetworkMode(settings) } }
+    }
+
+    /** L'application passe en arriere-plan : on rend le trafic du telephone normal. */
+    fun onAppBackground() {
+        val settings = _state.value.settings
+        if (!settings.vpnEnabled) return
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { VpnTunnel.down(getApplication()) }
+            _state.update { it.copy(vpnActive = false) }
+        }
+    }
+
+    private suspend fun createVpnConfig(settings: AppSettings): String {
+        val server = freebox.vpnServers().firstOrNull { it.type == "wireguard" }
+            ?: throw FreeboxException("Cette Freebox n'expose pas de serveur WireGuard")
+        if (server.state != "started") freebox.enableWireGuardServer(server.id)
+        val login = freebox.ensureWireGuardUser(settings.vpnLogin)
+        return freebox.wireGuardConfig(server.id, login)
+    }
+
+    private suspend fun startTunnel(context: Context, config: String) {
+        val settings = _state.value.settings
+        // Sur le reseau local, monter un tunnel vers la box serait inutile (et parfois
+        // impossible, le NAT local ne revenant pas toujours). On garde l'accord et le
+        // tunnel se montera automatiquement hors du reseau.
+        if (probeLan(settings.freeboxHost)) {
+            repo.setVpnEnabled(true)
+            _state.update { it.copy(vpnBusy = false, vpnActive = false) }
+            message("VPN activé : il se connectera automatiquement hors du réseau local")
+            return
+        }
+        val error = withContext(Dispatchers.IO) { VpnTunnel.up(context, config) }
+        if (error != null) {
+            _state.update { it.copy(vpnBusy = false) }
+            message("VPN inactif : $error")
+            return
+        }
+        repo.setVpnEnabled(true)
+        if (settings.freeboxLanIp.isNotBlank()) freebox.useHost(settings.freeboxLanIp)
+        _state.update { it.copy(vpnBusy = false, vpnActive = true) }
+        message("VPN activé : S3ARCH reste joignable hors du réseau local")
+    }
+
+    private fun syncNetworkMode(settings: AppSettings) {
+        val context = getApplication<Application>()
+        if (probeLan(settings.freeboxHost)) {
+            if (VpnTunnel.isUp(context)) VpnTunnel.down(context)
+            freebox.useHost(settings.freeboxHost)
+            AppLog.info("VPN", "Réseau local joignable : VPN inactif")
+        } else {
+            if (!VpnTunnel.isUp(context)) {
+                val error = VpnTunnel.up(context, settings.vpnConfig)
+                if (error != null) {
+                    AppLog.warn("VPN", "Hors réseau local, tunnel indisponible : $error")
+                    return
+                }
+            }
+            freebox.useHost(settings.freeboxLanIp.ifBlank { settings.freeboxHost })
+            AppLog.info("VPN", "Hors du réseau local : tunnel actif (box ${settings.freeboxLanIp})")
+        }
+        _state.update { it.copy(vpnActive = VpnTunnel.isUp(context)) }
+    }
+
+    /** Le portail de la box repond-il sur le reseau local ? */
+    private fun probeLan(host: String): Boolean = runCatching {
+        val clean = host.removePrefix("http://").removePrefix("https://").substringBefore('/')
+        Socket().use { socket -> socket.connect(InetSocketAddress(clean, 80), 1_500) }
+    }.isSuccess
+
+    /** Memorise l'IP locale de la box : c'est elle qu'on joint a travers le tunnel. */
+    private suspend fun rememberLanIp(host: String) = withContext(Dispatchers.IO) {
+        val clean = host.removePrefix("http://").removePrefix("https://").substringBefore('/')
+        val ip = runCatching { InetAddress.getByName(clean).hostAddress }.getOrNull()
+        if (!ip.isNullOrBlank()) repo.saveLanIp(ip)
     }
 
     // ------------------------------------------------------------------ reglages

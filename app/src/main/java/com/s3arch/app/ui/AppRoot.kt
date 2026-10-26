@@ -22,6 +22,7 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -31,8 +32,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.s3arch.app.ui.components.LogoMark
+import com.s3arch.app.ui.components.VpnConsentEffect
 import com.s3arch.app.ui.theme.S3ARCHTheme
 import com.s3arch.app.ui.screens.DownloadsScreen
 import com.s3arch.app.ui.screens.SearchScreen
@@ -44,6 +49,24 @@ fun AppRoot(vm: S3archViewModel) {
     val state by vm.state.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
 
+    // Bascule LAN <-> VPN a chaque retour au premier plan, et coupe le tunnel quand
+    // l'application passe en arriere-plan (le reste du telephone n'est pas ralenti).
+    val lifecycleOwner = ProcessLifecycleOwner.get()
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_START -> vm.applyNetworkMode()
+                Lifecycle.Event.ON_STOP -> vm.onAppBackground()
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    LaunchedEffect(state.loaded) {
+        if (state.loaded) vm.applyNetworkMode()
+    }
+
     LaunchedEffect(state.message) {
         val text = state.message
         if (text != null) {
@@ -53,6 +76,7 @@ fun AppRoot(vm: S3archViewModel) {
     }
 
     S3ARCHTheme(dynamicColor = state.settings.dynamicColor) {
+        VpnConsentEffect(state, vm)
         when {
             !state.loaded -> SplashScreen()
             !state.settings.onboardingDone -> SetupScreen(

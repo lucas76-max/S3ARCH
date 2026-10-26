@@ -62,7 +62,9 @@ import com.s3arch.app.ui.components.ScreenHeader
 import com.s3arch.app.ui.components.SectionCard
 import com.s3arch.app.ui.components.StatusDot
 import com.s3arch.app.ui.components.TrackerKeyEditor
+import com.s3arch.app.ui.components.VpnSettingsContent
 import com.s3arch.app.util.AppLog
+import androidx.compose.ui.platform.LocalContext
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -76,6 +78,7 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
     var host by rememberSaveable { mutableStateOf(state.settings.freeboxHost) }
     var folder by rememberSaveable { mutableStateOf(state.settings.freeboxDownloadDir) }
     var showAddTracker by remember { mutableStateOf(false) }
+    val context = LocalContext.current
 
     if (showAddTracker) {
         AddTrackerDialog(
@@ -335,6 +338,20 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+            }
+        }
+
+        item {
+            SectionCard(
+                modifier = Modifier.padding(horizontal = 16.dp),
+                title = "Accès hors du réseau local",
+                subtitle = "VPN WireGuard créé automatiquement sur votre Freebox.",
+            ) {
+                VpnSettingsContent(
+                    state = state,
+                    onEnable = { vm.enableVpn(context) },
+                    onDisable = { vm.disableVpn(context) },
+                )
             }
         }
 

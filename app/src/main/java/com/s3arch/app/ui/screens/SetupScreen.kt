@@ -51,6 +51,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.s3arch.app.data.Tracker
@@ -61,6 +62,7 @@ import com.s3arch.app.ui.UiState
 import com.s3arch.app.ui.components.AddTrackerDialog
 import com.s3arch.app.ui.components.LogoMark
 import com.s3arch.app.ui.components.SectionCard
+import com.s3arch.app.ui.components.VpnProposalCard
 import com.s3arch.app.ui.components.TrackerKeyEditor
 import com.s3arch.app.ui.components.scaleOnPress
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -85,6 +87,7 @@ fun SetupScreen(
     var host by rememberSaveable { mutableStateOf(state.settings.freeboxHost) }
     var folder by rememberSaveable { mutableStateOf(state.settings.freeboxDownloadDir) }
     var showAddTracker by remember { mutableStateOf(false) }
+    val context = LocalContext.current
 
     val hasKey = listOf(c411Key, tr4kerKey, v3xKey).any { it.isNotBlank() } ||
         state.settings.customTrackers.any { it.key.isNotBlank() }
@@ -323,6 +326,18 @@ fun SetupScreen(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+
+                        // Proposition de VPN : une seule fois, refusable.
+                        if (connected && !state.settings.vpnPromptAnswered &&
+                            state.settings.vpnConfig.isBlank()
+                        ) {
+                            VpnProposalCard(
+                                enabled = true,
+                                busy = state.vpnBusy,
+                                onEnable = { vm.enableVpn(context) },
+                                onDecline = { vm.dismissVpnPrompt() },
+                            )
+                        }
                     }
                     Spacer(Modifier.height(12.dp))
                 }

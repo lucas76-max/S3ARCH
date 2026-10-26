@@ -313,6 +313,16 @@ data class AppSettings(
     val sortMode: SortMode = SortMode.SIZE_ASC,
     /** Types de contenus a afficher ; ensemble vide = aucun filtre. */
     val enabledTypes: Set<String> = emptySet(),
+    /** L'utilisateur a accepte l'acces hors du reseau local via le VPN de la box. */
+    val vpnEnabled: Boolean = false,
+    /** La proposition de VPN a deja ete acceptee ou refusee. */
+    val vpnPromptAnswered: Boolean = false,
+    /** Configuration wg-quick du client WireGuard, fournie par la Freebox. */
+    val vpnConfig: String = "",
+    /** Identifiant de l'utilisateur VPN cree sur la box. */
+    val vpnLogin: String = "s3arch",
+    /** IP locale de la box, utilisee a travers le tunnel hors du reseau local. */
+    val freeboxLanIp: String = "",
 ) {
     fun keyFor(tracker: Tracker): String = when (tracker) {
         Tracker.C411 -> c411Key

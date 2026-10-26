@@ -23,8 +23,8 @@ android {
         applicationId = "com.s3arch.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 12
-        versionName = "1.0.0"
+        versionCode = 13
+        versionName = "1.1.0"
     }
 
     signingConfigs {
@@ -89,6 +89,8 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("androidx.media3:media3-exoplayer:1.5.1")
     implementation("androidx.media3:media3-ui:1.5.1")
+    implementation("androidx.lifecycle:lifecycle-process:2.8.7")
+    implementation("com.wireguard.android:tunnel:1.0.20230706")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 

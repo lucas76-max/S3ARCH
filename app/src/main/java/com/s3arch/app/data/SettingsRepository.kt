@@ -40,6 +40,11 @@ class SettingsRepository(private val context: Context) {
             dynamicColor = prefs[DYNAMIC_COLOR] ?: true,
             sortMode = SortMode.fromId(prefs[SORT_MODE]),
             enabledTypes = prefs[TYPES] ?: emptySet(),
+            vpnEnabled = prefs[VPN_ENABLED] ?: false,
+            vpnPromptAnswered = prefs[VPN_ANSWERED] ?: false,
+            vpnConfig = prefs[VPN_CONFIG] ?: "",
+            vpnLogin = prefs[VPN_LOGIN] ?: "s3arch",
+            freeboxLanIp = prefs[FB_LAN_IP] ?: "",
         )
     }
 
@@ -110,6 +115,32 @@ class SettingsRepository(private val context: Context) {
         context.dataStore.edit { it[ONBOARDING] = true }
     }
 
+    /** Enregistre la configuration VPN et marque la proposition comme traitee. */
+    suspend fun saveVpnConfig(config: String, login: String) {
+        context.dataStore.edit { prefs ->
+            prefs[VPN_CONFIG] = config
+            prefs[VPN_LOGIN] = login
+            prefs[VPN_ANSWERED] = true
+        }
+    }
+
+    suspend fun setVpnEnabled(enabled: Boolean) {
+        context.dataStore.edit { prefs ->
+            prefs[VPN_ENABLED] = enabled
+            prefs[VPN_ANSWERED] = true
+        }
+    }
+
+    /** L'utilisateur refuse la proposition : on ne la represente plus. */
+    suspend fun dismissVpnPrompt() {
+        context.dataStore.edit { it[VPN_ANSWERED] = true }
+    }
+
+    suspend fun saveLanIp(ip: String) {
+        if (ip.isBlank()) return
+        context.dataStore.edit { it[FB_LAN_IP] = ip.trim() }
+    }
+
     private val trackedKey = stringPreferencesKey("tracked_downloads")
 
     val downloads: Flow<List<TrackedDownload>> = context.dataStore.data.map { prefs ->
@@ -169,5 +200,10 @@ class SettingsRepository(private val context: Context) {
         val DYNAMIC_COLOR = booleanPreferencesKey("dynamic_color")
         val SORT_MODE = stringPreferencesKey("sort_mode")
         val TYPES = stringSetPreferencesKey("enabled_types")
+        val VPN_ENABLED = booleanPreferencesKey("vpn_enabled")
+        val VPN_ANSWERED = booleanPreferencesKey("vpn_prompt_answered")
+        val VPN_CONFIG = stringPreferencesKey("vpn_config")
+        val VPN_LOGIN = stringPreferencesKey("vpn_login")
+        val FB_LAN_IP = stringPreferencesKey("freebox_lan_ip")
     }
 }

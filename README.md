@@ -1,6 +1,6 @@
 # S3ARCH
 
-**Version 1.0.0**
+**Version 1.1.0**
 
 Application Android **Material 3 Expressive** (avec **Material You** : couleurs dynamiques issues du
 fond d'écran sur Android 12+) pour chercher un contenu sur plusieurs trackers torrent
@@ -39,10 +39,12 @@ dans un **lecteur intégré** (Media3/ExoPlayer) ou avec **VLC**.
 - **Gestion des transferts** : bouton **Annuler** (arrête la tâche et la retire de la file
   Freebox sans effacer le contenu déjà téléchargé) et bouton **Supprimer du disque**
   (`DELETE /downloads/{id}/erase`, avec confirmation).
-- **Lecture avec VLC** : S3ARCH lit la liste des fichiers de la tâche
-  (`GET /downloads/{id}/files`), garde le plus gros média (pas le dossier du torrent ni
-  l'échantillon) et ouvre son **lien de partage** Freebox, lisible sans authentification.
-  Le proxy HTTP local authentifié ne sert plus que de repli.
+- **Lecture** : lecteur intégré (Media3/ExoPlayer) via « Lire dans S3ARCH », ou VLC. S3ARCH lit
+  la liste des fichiers de la tâche (`GET /downloads/{id}/files`), garde le plus gros média (pas
+  le dossier du torrent ni l'échantillon) et le sert par un proxy HTTP local authentifié.
+- **Accès hors du réseau local (VPN WireGuard)** : proposé à la fin de l'appairage et dans les
+  réglages, accepté ou refusé librement. L'app crée elle-même la configuration sur la Freebox,
+  puis bascule automatiquement sur le tunnel quand la box n'est pas joignable en local.
 
 ## Écrans
 
@@ -50,8 +52,8 @@ dans un **lecteur intégré** (Media3/ExoPlayer) ou avec **VLC**.
 |---|---|
 | Configuration (1er lancement) | Étape 1 : clés API C411 / TR4KER / V3X (+ endpoint Torznab editable). Étape 2 : adresse Freebox + dossier + autorisation. |
 | Recherche | Barre de recherche, filtres par tracker, sélecteur de tri, résultats filtrés par type, bouton de téléchargement. |
-| Transferts | Cartes de téléchargement avec type de tâche (Torrent / Fichier), progression temps réel, débit, ETA, bouton « Lire avec VLC », bouton « Annuler » et « Supprimer du disque ». |
-| Réglages | Clés API, trackers tiers Torznab, filtre par types de contenus, dossier Freebox, session/re-autorisation, couleurs dynamiques, journaux. |
+| Transferts | Cartes de téléchargement avec type de tâche (Torrent / Fichier), progression temps réel, débit, ETA, boutons « Lire dans S3ARCH » / « Lire avec VLC », « Annuler », « Supprimer du disque » et « Masquer de la liste ». |
+| Réglages | Clés API, trackers tiers Torznab, filtre par types de contenus, dossier Freebox, session/réautorisation, **VPN hors réseau local**, couleurs dynamiques, journaux. |
 
 ## Trackers tiers (Torznab)
 
@@ -186,12 +188,48 @@ VLC est lancé par Intent (`org.videolan.vlc`) ; si VLC n'est pas installé, l'a
 lecteur intégré. Le journal (Réglages → Journaux) indique le fichier retenu, l'URL utilisée et
 chaque requête servie par le proxy.
 
+## Accès hors du réseau local (VPN)
+
+Hors du Wi-Fi de la maison, `mafreebox.freebox.fr` ne répond plus : l'application propose donc de
+créer un **serveur WireGuard** sur la Freebox. La proposition apparaît une seule fois, à la fin de
+l'appairage (et reste disponible dans les réglages), avec une explication et deux choix :
+**Créer le VPN** ou **Pas maintenant**. Un refus n'est pas définitif : le bouton reste dans les
+réglages.
+
+Côté Freebox, tout est automatisé (API officielle, section `vpn`) :
+
+| Étape | Appel |
+|---|---|
+| Trouver le serveur | `GET /vpn/` → entrée de type `wireguard` |
+| L'activer | `PUT /vpn/wireguard/config/` avec `{"enabled": true}` (sauté s'il tourne déjà) |
+| Choisir une adresse | `GET /vpn/ip_pool/` → première IPv4 libre entre `ip_start` et `ip_end` |
+| Créer l'utilisateur | `POST /vpn/user/` `{login: "s3arch", type: "wireguard", ip_reservation: …}` |
+| Récupérer la config | `GET /vpn/download_config/wireguard/s3arch/plain` (wg-quick) |
+
+La configuration obtenue (clé privée, clé publique du serveur, endpoint, DNS, MTU) est conservée
+sur l'appareil, et le tunnel est monté par la bibliothèque officielle
+`com.wireguard.android:tunnel`. Android demande **une fois** l'autorisation d'établir une connexion
+VPN : c'est le seul geste demandé à l'utilisateur.
+
+**Bascule automatique.** À chaque lancement et retour au premier plan, l'app teste le portail de la
+box (connexion TCP sur le port 80, 1,5 s) :
+
+- joignable → le tunnel est coupé et les appels repartent sur `mafreebox.freebox.fr` ;
+- injoignable → le tunnel est monté et les appels visent l'**IP locale** de la box (mémorisée à
+  l'appairage), qui passe par le VPN.
+
+Quand l'application passe en arrière-plan, le tunnel est coupé : le reste du téléphone n'est pas
+ralenti. Sur le réseau local, activer le VPN ne monte rien (un tunnel vers soi-même ne sert à
+rien) : l'accord est enregistré et le tunnel s'établira de lui-même hors de chez vous.
+
 ## Stack technique
 
 - Kotlin 2.0.21, Jetpack Compose (BOM 2024.12.01), Material 3, Navigation Compose
 - DataStore Preferences pour les clés/réglages et la liste des transferts
 - OkHttp 4.12 pour les appels trackers et Freebox
 - Media3 (ExoPlayer) 1.5.1 pour le lecteur vidéo intégré
+- WireGuard Android `tunnel` 1.0.20230706 pour le VPN hors réseau local
+- lifecycle-process pour la bascule LAN/VPN au premier plan
 - kotlinx.serialization pour la persistance locale
 - minSdk 26, targetSdk 35, compileSdk 35, JDK 17, AGP 8.7.3 / Gradle 8.9
 

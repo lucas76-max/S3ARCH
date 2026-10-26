@@ -22,6 +22,8 @@
         android:usesCleartextTraffic="true"
         android:theme="@style/Theme.S3ARCH">
 
+        <!-- Le tunnel WireGuard utilise le VpnService declare par la bibliotheque
+             officielle (fusion de manifeste) : rien a redouter ici. -->
         <activity
             android:name=".ui.player.PlayerActivity"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|smallestScreenSize"
