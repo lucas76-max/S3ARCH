@@ -50,6 +50,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.s3arch.app.BuildConfig
 import com.s3arch.app.data.MediaType
 import com.s3arch.app.data.Tracker
 import com.s3arch.app.data.TrackerSource
@@ -58,11 +59,13 @@ import com.s3arch.app.ui.S3archViewModel
 import com.s3arch.app.ui.UiState
 import com.s3arch.app.ui.components.AddTrackerDialog
 import com.s3arch.app.ui.components.CustomTrackerRow
+import com.s3arch.app.ui.components.FreeboxRightsCard
 import com.s3arch.app.ui.components.ScreenHeader
 import com.s3arch.app.ui.components.SectionCard
 import com.s3arch.app.ui.components.StatusDot
 import com.s3arch.app.ui.components.TrackerKeyEditor
 import com.s3arch.app.ui.components.VpnSettingsContent
+import com.s3arch.app.ui.components.openFreeboxOs
 import com.s3arch.app.util.AppLog
 import androidx.compose.ui.platform.LocalContext
 
@@ -341,6 +344,17 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
             }
         }
 
+        if (state.needsSettingsRight) {
+            item {
+                FreeboxRightsCard(
+                    state = state,
+                    onOpenBox = { openFreeboxOs(context, state.settings.freeboxHost) },
+                    onRetry = { vm.retryAfterFreeboxRights(context) },
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                )
+            }
+        }
+
         item {
             SectionCard(
                 modifier = Modifier.padding(horizontal = 16.dp),
@@ -471,7 +485,10 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
                             modifier = Modifier.size(16.dp),
                         )
                         Spacer(Modifier.size(8.dp))
-                        Text("S3ARCH 1.5.0 · Material 3 Expressive", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            "S3ARCH ${BuildConfig.VERSION_NAME} · Material 3 Expressive",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(

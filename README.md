@@ -1,6 +1,6 @@
 # S3ARCH
 
-**Version 1.1.0**
+**Version 1.2.0**
 
 Application Android **Material 3 Expressive** (avec **Material You** : couleurs dynamiques issues du
 fond d'écran sur Android 12+) pour chercher un contenu sur plusieurs trackers torrent
@@ -221,6 +221,23 @@ box (connexion TCP sur le port 80, 1,5 s) :
 Quand l'application passe en arrière-plan, le tunnel est coupé : le reste du téléphone n'est pas
 ralenti. Sur le réseau local, activer le VPN ne monte rien (un tunnel vers soi-même ne sert à
 rien) : l'accord est enregistré et le tunnel s'établira de lui-même hors de chez vous.
+
+### Le droit « Paramètres » de la Freebox
+
+L'API `vpn` est protégée par le droit **`settings`** : si l'application ne l'a pas, la box répond
+`403 insufficient_rights` avec `missing_right: settings`. L'application lit désormais les droits
+réellement accordés (bloc `permissions` renvoyé par `POST /login/session/`) et, quand `settings`
+manque, affiche une carte explicite dans l'appairage **et** dans les réglages :
+
+1. Freebox OS (`mafreebox.freebox.fr`) → **Paramètres de la Freebox** → **Gestion des applications** ;
+2. application **S3ARCH** → cocher **Paramètres** → **Enregistrer** ;
+3. revenir dans S3ARCH → **J'ai autorisé** : la session est rouverte (seul moment où la box
+   renvoie les droits) et la création du VPN reprend automatiquement.
+
+La demande d'autorisation transmet aussi la liste des droits nécessaires (`settings`,
+`downloader`, `explorer`) ; les firmwares qui refusent ce champ retombent sur la demande standard.
+Sans ce droit, la création du VPN ne peut pas fonctionner : c'est une limite de Freebox OS, pas de
+l'application.
 
 ## Stack technique
 

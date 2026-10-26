@@ -71,7 +71,15 @@ data class UiState(
     val vpnBusy: Boolean = false,
     /** Tunnel actuellement monte (hors du reseau local). */
     val vpnActive: Boolean = false,
-)
+    /**
+     * Droits accordes par la Freebox (null tant qu'aucune session n'a ete ouverte).
+     * Le droit `settings` conditionne l'acces a `/vpn/`.
+     */
+    val freeboxRights: Set<String>? = null,
+) {
+    /** Vrai quand la box a explicitement refuse le droit utile au VPN. */
+    val needsSettingsRight: Boolean get() = freeboxRights?.contains("settings") == false
+}
 
 class S3archViewModel(app: Application) : AndroidViewModel(app) {
 
@@ -519,6 +527,7 @@ class S3archViewModel(app: Application) : AndroidViewModel(app) {
                     )
                 }
                 freebox.connect(box.host, box.apiBase, token)
+                syncRights()
                 runCatching { freebox.ensureFolder(downloadDir) }
 
                 repo.saveFreebox(box.host, box.apiBase, box.apiVersion, token, downloadDir)
@@ -546,6 +555,7 @@ class S3archViewModel(app: Application) : AndroidViewModel(app) {
                 ensureFreebox()
                 runCatching { freebox.ensureFolder(_state.value.settings.freeboxDownloadDir) }
                     .onFailure { throw FreeboxException("Dossier : ${it.message}") }
+                syncRights()
                 _state.update {
                     it.copy(setup = SetupState(FreeboxStatus.Connected, "Session Freebox active"))
                 }
@@ -576,6 +586,13 @@ class S3archViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
         freebox.connect(host, settings.freeboxApiBase, settings.freeboxAppToken)
+        syncRights()
+    }
+
+    /** Recopie les droits accordes par la box dans l'etat affiche. */
+    private fun syncRights() {
+        val rights = if (freebox.permissionsKnown) freebox.grantedPermissions else null
+        _state.update { it.copy(freeboxRights = rights) }
     }
 
     // ------------------------------------------------------------------ VPN
@@ -609,7 +626,50 @@ class S3archViewModel(app: Application) : AndroidViewModel(app) {
             } catch (e: Exception) {
                 AppLog.throwable("VPN", "Creation du VPN impossible", e)
                 _state.update { it.copy(vpnBusy = false) }
-                message(e.message?.takeIf { it.isNotBlank() } ?: "Création du VPN impossible")
+                val refused = (e as? FreeboxException)?.code == "insufficient_rights"
+                if (refused) {
+                    _state.update { it.copy(freeboxRights = (it.freeboxRights ?: emptySet()) - "settings") }
+                }
+                message(
+                    when {
+                        refused ->
+                            "La Freebox exige le droit « Paramètres » : ouvrez Freebox OS → " +
+                                "Paramètres de la Freebox → Gestion des applications → S3ARCH, " +
+                                "cochez « Paramètres », puis revenez appuyer sur « Créer le VPN »."
+                        else -> e.message?.takeIf { it.isNotBlank() } ?: "Création du VPN impossible"
+                    },
+                )
+            }
+        }
+    }
+
+    /**
+     * Apres avoir coche le droit « Paramètres » sur la box : on rouvre la session pour
+     * recuperer les nouveaux droits, puis on relance la creation du VPN si besoin.
+     */
+    fun retryAfterFreeboxRights(context: Context) {
+        if (_state.value.vpnBusy) return
+        _state.update { it.copy(vpnBusy = true) }
+        viewModelScope.launch {
+            try {
+                val settings = _state.value.settings
+                // Session fermee puis rouverte : le jeu de droits est renvoye a ce moment-la.
+                freebox.reset()
+                _state.update { it.copy(freeboxRights = null) }
+                ensureFreebox(settings)
+                syncRights()
+                if (!freebox.hasSettingsRight) {
+                    _state.update { it.copy(vpnBusy = false) }
+                    message("Droit « Paramètres » toujours absent : Enregistrez bien la modification sur la Freebox")
+                    return@launch
+                }
+                _state.update { it.copy(vpnBusy = false) }
+                message("Droit « Paramètres » accordé ✓")
+                if (settings.vpnConfig.isBlank()) enableVpn(context)
+            } catch (e: Exception) {
+                AppLog.throwable("Freebox", "Rafraichissement des droits impossible", e)
+                _state.update { it.copy(vpnBusy = false) }
+                message(e.message?.takeIf { it.isNotBlank() } ?: "Freebox injoignable")
             }
         }
     }

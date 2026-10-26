@@ -89,6 +89,78 @@ fun VpnProposalCard(
     }
 }
 
+/**
+ * Carte affichee quand la Freebox n'accorde pas le droit « Paramètres ».
+ *
+ * L'API `/vpn/` de la box repond `insufficient_rights` (`missing_right: settings`) tant
+ * que ce droit n'est pas coche pour S3ARCH : la creation du VPN est donc impossible, et
+ * aucun contournement n'existe cote API. On explique exactement ou le cocher.
+ */
+@Composable
+fun FreeboxRightsCard(
+    state: UiState,
+    onOpenBox: () -> Unit,
+    onRetry: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    SectionCard(
+        modifier = modifier,
+        title = "Droit « Paramètres » à accorder",
+        subtitle = "La Freebox refuse la création du VPN sans cette autorisation.",
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(
+                "Votre Freebox a autorisé S3ARCH pour les téléchargements, mais pas pour ses " +
+                    "réglages. Or c'est ce droit qui permet de créer le serveur WireGuard.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                "1. Ouvrez Freebox OS (mafreebox.freebox.fr) depuis le réseau local.\n" +
+                    "2. Paramètres de la Freebox → Gestion des applications → S3ARCH.\n" +
+                    "3. Cochez « Paramètres », puis Enregistrer.\n" +
+                    "4. Revenez ici et appuyez sur « J'ai autorisé ».",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedButton(
+                    onClick = onOpenBox,
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(50),
+                ) { Text("Ouvrir Freebox OS", style = MaterialTheme.typography.labelMedium) }
+                Button(
+                    onClick = onRetry,
+                    enabled = !state.vpnBusy,
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(50),
+                ) {
+                    if (state.vpnBusy) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.onPrimary,
+                        )
+                        Spacer(Modifier.size(8.dp))
+                    }
+                    Text("J'ai autorisé", style = MaterialTheme.typography.labelMedium)
+                }
+            }
+        }
+    }
+}
+
+/** Ouvre Freebox OS dans le navigateur, sur le reseau local. */
+fun openFreeboxOs(context: android.content.Context, host: String) {
+    val clean = host.removePrefix("http://").removePrefix("https://").substringBefore('/')
+        .ifBlank { "mafreebox.freebox.fr" }
+    val intent = android.content.Intent(
+        android.content.Intent.ACTION_VIEW,
+        android.net.Uri.parse("http://$clean/"),
+    ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+    runCatching { context.startActivity(intent) }
+}
+
 /** Contenu de la section VPN des reglages (a placer dans une [SectionCard]). */
 @Composable
 fun VpnSettingsContent(
@@ -144,6 +216,16 @@ fun VpnSettingsContent(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
 
+        if (state.needsSettingsRight) {
+            Text(
+                "⚠️ La Freebox n'accorde pas encore le droit « Paramètres » : cochez-le dans " +
+                    "Freebox OS → Paramètres de la Freebox → Gestion des applications → S3ARCH, " +
+                    "puis appuyez sur « J'ai autorisé » ci-dessus.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+
         if (settings.vpnEnabled) {
             OutlinedButton(
                 onClick = onDisable,
@@ -155,7 +237,7 @@ fun VpnSettingsContent(
         } else {
             Button(
                 onClick = onEnable,
-                enabled = !state.vpnBusy,
+                enabled = !state.vpnBusy && !state.needsSettingsRight,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(52.dp),

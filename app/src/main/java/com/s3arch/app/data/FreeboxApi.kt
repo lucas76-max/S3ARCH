@@ -1,6 +1,7 @@
 package com.s3arch.app.data
 
 import android.util.Base64
+import com.s3arch.app.BuildConfig
 import com.s3arch.app.data.vpn.VpnAddresses
 import com.s3arch.app.util.AppLog
 import com.s3arch.app.util.DownloadUrls
@@ -63,6 +64,20 @@ class FreeboxApi {
     @Volatile private var sessionToken: String? = null
     @Volatile private var appToken: String? = null
 
+    /** Droits accordes a l'application, renvoyes par `POST /login/session/`. */
+    @Volatile var grantedPermissions: Set<String> = emptySet()
+        private set
+
+    /** Vrai si la box a effectivement liste les droits (sinon on ne sait rien). */
+    @Volatile var permissionsKnown: Boolean = false
+        private set
+
+    /**
+     * Le droit `settings` est indispensable au VPN : l'API `/vpn/` le refuse sinon
+     * (`insufficient_rights`, `missing_right: settings`).
+     */
+    val hasSettingsRight: Boolean get() = "settings" in grantedPermissions
+
     val isConnected: Boolean get() = sessionToken != null && baseUrl != null
 
     data class BoxInfo(
@@ -113,18 +128,30 @@ class FreeboxApi {
 
     suspend fun requestAuthorization(host: String, apiBase: String): Pair<String, String> =
         withContext(Dispatchers.IO) {
-            val payload = buildJsonObject {
+            val url = "http://${normalizeHost(host)}$apiBase/login/authorize/"
+            fun payload(withPermissions: Boolean) = buildJsonObject {
                 put("app_id", APP_ID)
                 put("app_name", APP_NAME)
                 put("app_version", APP_VERSION)
                 put("device_name", android.os.Build.MODEL ?: "Android")
+                if (withPermissions) {
+                    put(
+                        "permissions",
+                        buildJsonObject { REQUESTED_PERMISSIONS.forEach { name -> put(name, true) } },
+                    )
+                }
             }
-            val result = rawCall(
-                url = "http://${normalizeHost(host)}$apiBase/login/authorize/",
-                method = "POST",
-                body = payload,
-                auth = null,
-            ).jsonObject
+            val result = try {
+                rawCall(url, "POST", payload(true), null).jsonObject
+            } catch (e: FreeboxException) {
+                // Le champ `permissions` n'est pas garanti par tous les firmwares : on
+                // refait la demande sans lui plutot que d'echouer a l'appairage.
+                AppLog.warn(
+                    "Freebox",
+                    "Demande d'autorisation avec droits refusee (${e.code ?: "?"}) : nouvelle demande standard",
+                )
+                rawCall(url, "POST", payload(false), null).jsonObject
+            }
             val token = result["app_token"]?.jsonPrimitive?.contentOrNull
                 ?: throw FreeboxException("Autorisation refusee : pas de token renvoye")
             val trackId = result["track_id"]?.jsonPrimitive?.contentOrNull
@@ -191,7 +218,50 @@ class FreeboxApi {
         appToken = token
         baseUrl = "http://$cleanHost$normalizedBase"
         sessionToken = session
+        rememberPermissions(result["permissions"])
         AppLog.info("Freebox", "Session ouverte sur $cleanHost$normalizedBase")
+    }
+
+    /**
+     * Retient les droits reellement accordes a l'application.
+     *
+     * La reponse de session contient un objet `permissions` (droit → booleen). Un droit
+     * absent vaut `false` : c'est ainsi qu'on detecte qu'une box refusera `/vpn/`
+     * (`missing_right: settings`) au lieu de laisser croire que le WireGuard manque.
+     */
+    private fun rememberPermissions(element: JsonElement?) {
+        val allowed = FreeboxRights.parse(element)
+        if (allowed == null) {
+            permissionsKnown = false
+            grantedPermissions = emptySet()
+            AppLog.warn("Freebox", "Droits de l'application non communiques par la box")
+            return
+        }
+        grantedPermissions = allowed
+        permissionsKnown = true
+        AppLog.info(
+            "Freebox",
+            "Droits accordes : ${if (allowed.isEmpty()) "(aucun)" else allowed.sorted().joinToString(", ")}",
+        )
+        if ("settings" !in allowed) {
+            AppLog.warn(
+                "Freebox",
+                "Droit « settings » absent : les réglages et le VPN seront refusés par la box",
+            )
+        }
+    }
+
+    /**
+     * Ferme la session courante pour forcer une reconnexion.
+     *
+     * C'est la seule facon de relire les droits de l'application : la box ne les renvoie
+     * qu'a l'ouverture de session (`POST /login/session/`).
+     */
+    fun reset() {
+        sessionToken = null
+        baseUrl = null
+        grantedPermissions = emptySet()
+        permissionsKnown = false
     }
 
     /**
@@ -578,8 +648,9 @@ class FreeboxApi {
     /** Serveurs VPN de la box ; on ne s'interesse qu'au WireGuard. */
     suspend fun vpnServers(): List<VpnServer> = withContext(Dispatchers.IO) {
         ensureSession()
-        val result = runCatching { authCall("/vpn/", "GET", null) }.getOrNull()
-            ?: return@withContext emptyList()
+        // Ne pas avaler l'erreur : un `insufficient_rights` doit remonter tel quel,
+        // sinon l'application annonce a tort « pas de serveur WireGuard ».
+        val result = authCall("/vpn/", "GET", null)
         (result as? JsonArray)?.mapNotNull { element ->
             val obj = element as? JsonObject ?: return@mapNotNull null
             val id = obj["name"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
@@ -866,8 +937,34 @@ class FreeboxApi {
     companion object {
         const val APP_ID = "com.s3arch.app"
         const val APP_NAME = "S3ARCH"
-        const val APP_VERSION = "1.6.0"
+        val APP_VERSION: String = BuildConfig.VERSION_NAME
         const val DEFAULT_DIR = "/Disque dur/S3ARCH"
+
+        /**
+         * Droits demandes a la Freebox lors de l'appairage.
+         *
+         * `settings` est necessaire pour creer le VPN WireGuard (endpoints `/vpn/`),
+         * `downloader` pour la file de telechargements et `explorer` pour le disque.
+         */
+        val REQUESTED_PERMISSIONS = listOf("settings", "downloader", "explorer")
+    }
+}
+
+/**
+ * Lecture de l'objet `permissions` renvoye par `POST /login/session/`.
+ *
+ * Exemple : `{"downloader": true, "explorer": true, "settings": false}`. Un droit
+ * absent vaut `false` (documentation Freebox OS), d'ou l'ensemble des seuls droits vrais.
+ */
+internal object FreeboxRights {
+
+    /** null quand la box ne renvoie pas de bloc `permissions` (information inconnue). */
+    fun parse(element: JsonElement?): Set<String>? {
+        val obj = element as? JsonObject ?: return null
+        return obj.mapNotNull { (name, value) ->
+            val granted = (value as? JsonPrimitive)?.contentOrNull?.toBooleanStrictOrNull() == true
+            if (granted) name else null
+        }.toSet()
     }
 }
 
@@ -877,7 +974,8 @@ internal object SafeErrors {
         "eacces" -> "Acces refuse par la Freebox ($message)"
         "enoent" -> "Chemin introuvable sur la Freebox ($message)"
         "auth_required", "invalid_session" -> "Session Freebox expiree"
-        "insufficient_rights" -> "Droits insuffisants : autorisez S3ARCH sur la Freebox"
+        "insufficient_rights" ->
+            "Droits insuffisants : autorisez « Paramètres » pour S3ARCH dans Freebox OS"
         "no_free_space" -> "Plus d'espace libre sur la Freebox"
         "invalid_request" ->
             "Parametres refuses par la Freebox : verifiez le dossier de destination et le lien du torrent"

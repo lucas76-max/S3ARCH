@@ -60,10 +60,12 @@ import com.s3arch.app.ui.FreeboxStatus
 import com.s3arch.app.ui.S3archViewModel
 import com.s3arch.app.ui.UiState
 import com.s3arch.app.ui.components.AddTrackerDialog
+import com.s3arch.app.ui.components.FreeboxRightsCard
 import com.s3arch.app.ui.components.LogoMark
 import com.s3arch.app.ui.components.SectionCard
 import com.s3arch.app.ui.components.VpnProposalCard
 import com.s3arch.app.ui.components.TrackerKeyEditor
+import com.s3arch.app.ui.components.openFreeboxOs
 import com.s3arch.app.ui.components.scaleOnPress
 import androidx.compose.foundation.interaction.MutableInteractionSource
 
@@ -332,10 +334,20 @@ fun SetupScreen(
                             state.settings.vpnConfig.isBlank()
                         ) {
                             VpnProposalCard(
-                                enabled = true,
+                                enabled = !state.needsSettingsRight,
                                 busy = state.vpnBusy,
                                 onEnable = { vm.enableVpn(context) },
                                 onDecline = { vm.dismissVpnPrompt() },
+                            )
+                        }
+
+                        // La box refuse /vpn/ sans le droit « Paramètres » : on l'explique
+                        // ici, avant meme que l'utilisateur ne tente la creation.
+                        if (connected && state.needsSettingsRight) {
+                            FreeboxRightsCard(
+                                state = state,
+                                onOpenBox = { openFreeboxOs(context, state.settings.freeboxHost) },
+                                onRetry = { vm.retryAfterFreeboxRights(context) },
                             )
                         }
                     }
