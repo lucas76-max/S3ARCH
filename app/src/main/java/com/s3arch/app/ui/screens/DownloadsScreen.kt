@@ -20,24 +20,30 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.CloudDownload
+import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.DownloadDone
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Speed
+import androidx.compose.material.icons.rounded.StopCircle
 import androidx.compose.material.icons.rounded.Timer
 import androidx.compose.material.icons.rounded.Upload
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -74,6 +80,7 @@ fun DownloadsScreen(state: UiState, vm: S3archViewModel) {
     val active = state.tasks.values.count { !it.isDone && !it.isError }
     val totalRate = state.tasks.values.sumOf { it.rxRate }
     val finished = state.tracked.count { state.tasks[it.taskId]?.isDone == true }
+    var confirmDelete by remember { mutableStateOf<TrackedDownload?>(null) }
 
     Column(
         modifier = Modifier
@@ -128,12 +135,43 @@ fun DownloadsScreen(state: UiState, vm: S3archViewModel) {
                         download = download,
                         task = state.tasks[download.taskId],
                         playing = state.playingId == download.taskId,
+                        busy = download.taskId in state.actionIds,
                         onPlay = { vm.play(context, download) },
-                        onRemove = { vm.removeTracked(download) },
+                        onCancel = { vm.cancelDownload(download) },
+                        onDelete = { confirmDelete = download },
                     )
                 }
             }
         }
+    }
+
+    // La suppression disque est definitive : on demande confirmation.
+    val target = confirmDelete
+    if (target != null) {
+        AlertDialog(
+            onDismissRequest = { confirmDelete = null },
+            icon = { Icon(Icons.Rounded.DeleteOutline, contentDescription = null) },
+            title = { Text("Supprimer du disque ?") },
+            text = {
+                Text(
+                    "« ${target.title} » sera retiré de la Freebox et ses fichiers " +
+                        "effacés définitivement du disque.",
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        vm.deleteFromDisk(target)
+                        confirmDelete = null
+                    },
+                ) {
+                    Text("Supprimer", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmDelete = null }) { Text("Garder") }
+            },
+        )
     }
 }
 
@@ -142,8 +180,10 @@ private fun DownloadCard(
     download: TrackedDownload,
     task: FreeboxTask?,
     playing: Boolean,
+    busy: Boolean,
     onPlay: () -> Unit,
-    onRemove: () -> Unit,
+    onCancel: () -> Unit,
+    onDelete: () -> Unit,
 ) {
     val progress = task?.progress ?: 0f
     val done = task?.isDone == true
@@ -201,19 +241,11 @@ private fun DownloadCard(
                             },
                         )
                         Pill(
-                            text = if (download.seeders > 0) "${download.seeders} seeders" else "seeders —",
+                            text =                        if (download.seeders > 0) "${download.seeders} seeders" else "seeders —",
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             icon = Icons.Rounded.Upload,
                         )
                     }
-                }
-                IconButton(onClick = onRemove, modifier = Modifier.size(32.dp)) {
-                    Icon(
-                        Icons.Rounded.Close,
-                        contentDescription = "Retirer de la liste",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(18.dp),
-                    )
                 }
             }
 
@@ -292,11 +324,11 @@ private fun DownloadCard(
                 }
             }
 
+            Spacer(Modifier.height(16.dp))
             if (done) {
-                Spacer(Modifier.height(16.dp))
                 Button(
                     onClick = onPlay,
-                    enabled = !playing,
+                    enabled = !playing && !busy,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(50.dp)
@@ -316,6 +348,53 @@ private fun DownloadCard(
                     Spacer(Modifier.size(8.dp))
                     Text("Lire avec VLC", style = MaterialTheme.typography.labelLarge)
                 }
+            } else {
+                OutlinedButton(
+                    onClick = onCancel,
+                    enabled = !busy,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp),
+                    shape = RoundedCornerShape(50),
+                ) {
+                    Icon(
+                        Icons.Rounded.StopCircle,
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp),
+                    )
+                    Spacer(Modifier.size(8.dp))
+                    Text(
+                        if (error) "Retirer de la file" else "Annuler le téléchargement",
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(10.dp))
+            TextButton(
+                onClick = onDelete,
+                enabled = !busy,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                if (busy) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(15.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                } else {
+                    Icon(
+                        Icons.Rounded.DeleteOutline,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+                Spacer(Modifier.size(8.dp))
+                Text(
+                    "Supprimer du disque",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.error,
+                )
             }
         }
     }

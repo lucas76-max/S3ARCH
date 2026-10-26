@@ -229,6 +229,45 @@ data class FreeboxTask(
         }
 }
 
+/**
+ * Un fichier appartenant a une tache de telechargement Freebox
+ * (`GET /downloads/{id}/files`).
+ *
+ * `previewUrl` est le lien de partage renvoye par la Freebox : il est lisible
+ * **sans authentification**, donc directement exploitable par VLC.
+ */
+data class FreeboxFile(
+    val name: String,
+    val path: String,
+    val mimeType: String,
+    val size: Long,
+    val previewUrl: String? = null,
+) {
+    val isMedia: Boolean
+        get() = mimeType.startsWith("video/") ||
+            mimeType.startsWith("audio/") ||
+            name.substringAfterLast('.', "").lowercase() in MEDIA_EXTENSIONS
+
+    companion object {
+        val MEDIA_EXTENSIONS = setOf(
+            "mkv", "mp4", "m4v", "avi", "mov", "webm", "ts", "m2ts", "mpg", "mpeg",
+            "wmv", "flv", "ogv", "mp3", "flac", "m4a", "aac", "ogg", "wav", "opus",
+        )
+    }
+}
+
+/**
+ * Choisit le fichier a lire dans une tache : le plus gros media.
+ *
+ * Un torrent de film contient souvent un dossier, un `.nfo`, des sous-titres et
+ * un echantillon de quelques Mo ; le plus gros fichier video est donc le film.
+ * C'est aussi ce qui corrige la lecture d'un torrent qui telecharge un dossier
+ * (l'ancien code passait le dossier a VLC, qui ne pouvait rien lire).
+ */
+fun List<FreeboxFile>.playableMedia(): FreeboxFile? =
+    filter { it.isMedia && it.size > 0L }.maxByOrNull { it.size }
+        ?: filter { it.isMedia }.maxByOrNull { it.size }
+
 /** Telechargement suivi par l'application (persiste entre deux lancements). */
 @Serializable
 data class TrackedDownload(

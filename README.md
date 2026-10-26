@@ -1,6 +1,6 @@
 # S3ARCH
 
-**Version 1.5.0**
+**Version 1.6.0**
 
 Application Android **Material 3 Expressive** (avec **Material You** : couleurs dynamiques issues du
 fond d'écran sur Android 12+) pour chercher un contenu sur plusieurs trackers torrent
@@ -36,8 +36,13 @@ avec **VLC**.
   résultats) et chaque appel Freebox (endpoint, code d'erreur, réponse) est consigné, avec
   boutons « Copier » et « Effacer ».
 - **Progression en temps réel** : pourcentage, débit, temps restant, rafraîchis toutes les 1,2 s.
-- **Lecture avec VLC** : VLC lit le fichier de la Freebox à travers un petit proxy HTTP local
-  authentifié qui relaie le flux et gère les requêtes `Range` (avance/recule possible).
+- **Gestion des transferts** : bouton **Annuler** (arrête la tâche et la retire de la file
+  Freebox sans effacer le contenu déjà téléchargé) et bouton **Supprimer du disque**
+  (`DELETE /downloads/{id}/erase`, avec confirmation).
+- **Lecture avec VLC** : S3ARCH lit la liste des fichiers de la tâche
+  (`GET /downloads/{id}/files`), garde le plus gros média (pas le dossier du torrent ni
+  l'échantillon) et ouvre son **lien de partage** Freebox, lisible sans authentification.
+  Le proxy HTTP local authentifié ne sert plus que de repli.
 
 ## Écrans
 
@@ -45,7 +50,7 @@ avec **VLC**.
 |---|---|
 | Configuration (1er lancement) | Étape 1 : clés API C411 / TR4KER / V3X (+ endpoint Torznab editable). Étape 2 : adresse Freebox + dossier + autorisation. |
 | Recherche | Barre de recherche, filtres par tracker, sélecteur de tri, résultats filtrés par type, bouton de téléchargement. |
-| Transferts | Cartes de téléchargement avec type de tâche (Torrent / Fichier), progression temps réel, débit, ETA, bouton « Lire avec VLC ». |
+| Transferts | Cartes de téléchargement avec type de tâche (Torrent / Fichier), progression temps réel, débit, ETA, bouton « Lire avec VLC », bouton « Annuler » et « Supprimer du disque ». |
 | Réglages | Clés API, trackers tiers Torznab, filtre par types de contenus, dossier Freebox, session/re-autorisation, couleurs dynamiques, journaux. |
 
 ## Trackers tiers (Torznab)
@@ -109,17 +114,41 @@ sous-dossier `S3ARCH`, et indique le chemin réellement utilisé dans les journa
 Le jeton d'application est conservé pour rouvrir une session silencieusement au prochain
 lancement ; la réautorisation n'est nécessaire qu'après révocation côté Freebox.
 
+## Gestion des transferts
+
+`GET /downloads/{id}` donne l'état d'une tâche. Les deux actions de l'écran Transferts utilisent
+les endpoints officiels :
+
+| Bouton | Appel | Effet |
+|---|---|---|
+| Annuler | `DELETE /downloads/{id}` | Arrête la tâche et la retire de la file, **fichiers conservés** |
+| Supprimer du disque | `DELETE /downloads/{id}/erase` | Retire la tâche **et efface les fichiers** |
+
+Dans les deux cas l'entrée disparaît de la liste suivie par l'app, et une confirmation est
+demandée avant l'effacement sur le disque.
+
 ## Lecture VLC
 
-Le fichier reste sur la Freebox : VLC ne peut pas présenter l'en-tête d'authentification
-Freebox. S3ARCH démarre donc un mini-serveur HTTP sur `127.0.0.1` qui :
+Une tâche BitTorrent porte presque toujours un **dossier** (`name`), pas un fichier : passer
+`dossier/nom` à VLC lui donne un répertoire, d'où un lecteur ouvert sur une adresse muette
+(« 127.0.0.1 ») et aucune lecture. La 1.6.0 demande donc à la Freebox la liste réelle des
+fichiers de la tâche (`GET /downloads/{id}/files`), puis :
 
-- reçoit `GET /<fichier>?path=<chemin base64>` ;
-- relance la requête vers `GET /api/vX/dl/<chemin base64>` avec `X-Fbx-App-Auth` ;
-- relaie le flux (200/206) et les en-têtes `Content-Range` / `Content-Length` vers VLC.
+1. garde le **plus gros média** (le film, pas le `.nfo`, les sous-titres ni l'échantillon de
+   quelques Mo) ;
+2. vérifie que son `preview_url` — le lien de partage renvoyé par la Freebox, lisible **sans
+   authentification** — répond bien (requête `Range: bytes=0-0`) avant de le confier à VLC ;
+3. sinon, replie sur le mini-serveur HTTP local `127.0.0.1` qui relance la requête vers
+   `GET /api/vX/fs/download/?path=<chemin base64>` avec `X-Fbx-App-Auth` et relaie le flux
+   (200/206) ainsi que `Content-Range` / `Content-Length`.
+
+L'URL locale a la forme `http://127.0.0.1:<port>/v/<jeton>/<nom-du-fichier>` : le nom réel
+termine l'URL (le lecteur affiche donc le film, pas « 127.0.0.1 ») et le flux est testé avant
+lancement, ce qui remonte le message d'erreur exact au lieu d'un VLC vide.
 
 VLC est lancé par Intent (`org.videolan.vlc`) ; si VLC n'est pas installé, le sélecteur de
-lecteurs Android est proposé.
+lecteurs Android est proposé. Le journal (Réglages → Journaux) indique le fichier retenu et
+l'URL utilisée.
 
 ## Stack technique
 
@@ -149,6 +178,8 @@ Play Store, et conservez-le si vous voulez continuer à mettre à jour l'app ins
   affiche l'URL exacte envoyée (passkey masquée) pour diagnostiquer un cas restant.
 - `bt_file_error` signifie que la Freebox n'a pas pu écrire dans le dossier cible (dossier
   absent, disque non monté ou plein) : le journal indique le chemin utilisé et la raison.
+- `preview_url` n'est fourni par la Freebox que pour les tâches BitTorrent terminées ; pour les
+  autres, l'app passe par le proxy local (d'où l'importance de la liste de fichiers).
 - L'app n'a pas pu être testée contre une Freebox réelle depuis l'environnement de build ;
   le flux d'autorisation, le format des requêtes et les endpoints suivent la documentation
   officielle Freebox OS (`dev.freebox.fr/sdk/os/`).

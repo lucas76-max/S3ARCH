@@ -2,7 +2,6 @@ package com.s3arch.app.ui
 
 import android.app.Application
 import android.content.Context
-import android.net.Uri
 import android.util.Base64
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -20,6 +19,7 @@ import com.s3arch.app.data.TrackerException
 import com.s3arch.app.data.TrackerSource
 import com.s3arch.app.data.TrackedDownload
 import com.s3arch.app.data.VlcProxyServer
+import com.s3arch.app.data.playableMedia
 import com.s3arch.app.util.AppLog
 import com.s3arch.app.util.DownloadUrls
 import com.s3arch.app.util.VlcLauncher
@@ -52,6 +52,8 @@ data class UiState(
     val tasks: Map<String, FreeboxTask> = emptyMap(),
     val freeboxError: String? = null,
     val playingId: String? = null,
+    /** Transferts en cours d'annulation / suppression (boutons desactives). */
+    val actionIds: Set<String> = emptySet(),
     val setup: SetupState = SetupState(),
     val message: String? = null,
 )
@@ -290,15 +292,52 @@ class S3archViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun removeTracked(download: TrackedDownload) {
+    /**
+     * Annule un transfert : `DELETE /downloads/{id}` arrete la tache et la retire de la
+     * file Freebox **sans** effacer ce qui a deja ete telecharge.
+     */
+    fun cancelDownload(download: TrackedDownload) {
+        removeTask(download, eraseFiles = false, success = "Téléchargement annulé")
+    }
+
+    /** Supprime le transfert **et** les fichiers du disque de la Freebox (`/erase`). */
+    fun deleteFromDisk(download: TrackedDownload) {
+        removeTask(download, eraseFiles = true, success = "Fichiers supprimés du disque")
+    }
+
+    private fun removeTask(download: TrackedDownload, eraseFiles: Boolean, success: String) {
+        val id = download.taskId
+        if (id in _state.value.actionIds) return
+        _state.update { it.copy(actionIds = it.actionIds + id) }
         viewModelScope.launch {
-            repo.removeDownload(download.taskId)
-            _state.update { it.copy(tasks = it.tasks - download.taskId) }
+            try {
+                ensureFreebox()
+                freebox.deleteTask(id, erase = eraseFiles)
+                repo.removeDownload(id)
+                _state.update {
+                    it.copy(tasks = it.tasks - id, message = success)
+                }
+            } catch (e: Exception) {
+                AppLog.error("Download", "Suppression de $id impossible : ${e.message}")
+                _state.update { it.copy(message = e.message ?: "Opération impossible") }
+            } finally {
+                _state.update { it.copy(actionIds = it.actionIds - id) }
+            }
         }
     }
 
     // ------------------------------------------------------------------ lecture VLC
 
+    /**
+     * Ouvre le media dans VLC.
+     *
+     * Une tache BitTorrent porte presque toujours un **dossier** (`name`) : passer
+     * `dossier/nom` a VLC revenait a lui donner un repertoire, d'ou l'ecran muet sur
+     * « 127.0.0.1 ». On demande donc a la Freebox la liste des fichiers de la tache
+     * (`/downloads/{id}/files`), on garde le plus gros media, et on privilegie son
+     * `preview_url` (lien de partage lisible sans authentification). Le proxy local
+     * ne sert plus que de repli, sur le chemin exact du fichier.
+     */
     fun play(context: Context, download: TrackedDownload) {
         if (_state.value.playingId != null) return
         _state.update { it.copy(playingId = download.taskId) }
@@ -306,19 +345,38 @@ class S3archViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 ensureFreebox()
                 val task = _state.value.tasks[download.taskId] ?: freebox.task(download.taskId)
-                val name = task?.name?.takeIf { it.isNotBlank() } ?: download.title
                 val folder = task?.downloadDir?.takeIf { it.isNotBlank() } ?: download.folder
-                val path = "${folder.trimEnd('/')}/$name"
+                val files = freebox.taskFiles(download.taskId)
+                val media = files.playableMedia()
+                val title = media?.name ?: task?.name?.takeIf { it.isNotBlank() } ?: download.title
 
+                // 1. Lien de partage Freebox : VLC l'ouvre sans en-tete d'authentification.
+                val share = media?.previewUrl
+                if (!share.isNullOrBlank()) {
+                    if (freebox.canStream(share)) {
+                        AppLog.info("Lecture", "« $title » via le lien de partage Freebox")
+                        AppLog.info("Lecture", share)
+                        if (VlcLauncher.play(context, share, title)) return@launch
+                    } else {
+                        AppLog.warn("Lecture", "Lien de partage injoignable, repli sur le proxy local")
+                    }
+                }
+
+                // 2. Repli : proxy local sur le fichier exact (jamais le dossier du torrent).
+                val path = media?.path?.takeIf { it.isNotBlank() }
+                    ?: "${folder.trimEnd('/')}/${task?.name ?: download.title}"
+                AppLog.info("Lecture", "Fichier : $path")
                 val port = proxy.start { encodedPath, range -> freebox.openFileBlocking(encodedPath, range) }
                 val encodedPath = Base64.encodeToString(path.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
-                val safeName = name.replace(Regex("[^A-Za-z0-9._-]"), "_").ifBlank { "video.mkv" }
-                val url = "http://127.0.0.1:$port/$safeName" +
-                    "?path=${Uri.encode(encodedPath)}&name=${Uri.encode(name)}"
-
-                val launched = VlcLauncher.play(context, url, download.title)
-                if (!launched) message("Aucun lecteur vidéo trouvé : installez VLC pour lire ce fichier")
+                val localPath = proxy.publish(encodedPath, title)
+                val code = proxy.probe(port, localPath)
+                val url = proxy.urlFor(port, localPath)
+                AppLog.info("Lecture", "Proxy local HTTP $code — $url")
+                if (!VlcLauncher.play(context, url, title)) {
+                    message("Aucun lecteur vidéo trouvé : installez VLC pour lire ce fichier")
+                }
             } catch (e: Exception) {
+                AppLog.error("Lecture", e.message ?: "Lecture impossible")
                 message(e.message ?: "Lecture impossible")
             } finally {
                 _state.update { it.copy(playingId = null) }

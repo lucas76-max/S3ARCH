@@ -52,6 +52,11 @@ class FreeboxApi {
         .readTimeout(60, TimeUnit.SECONDS)
         .build()
 
+    /** Client court pour tester un lien avant de le confier au lecteur. */
+    private val probeClient: OkHttpClient = Network.http.newBuilder()
+        .callTimeout(8, TimeUnit.SECONDS)
+        .build()
+
     @Volatile private var baseUrl: String? = null
     @Volatile private var sessionToken: String? = null
     @Volatile private var appToken: String? = null
@@ -375,6 +380,20 @@ class FreeboxApi {
         runCatching { authCall("/downloads/$id/", "GET", null).asTask() }.getOrNull()
     }
 
+    /**
+     * Fichiers reels d'une tache (`GET /downloads/{id}/files`).
+     *
+     * Indispensable pour la lecture : une tache BitTorrent porte souvent un dossier
+     * (`name`) et non un fichier, et chaque fichier expose un `preview_url` lisible
+     * sans authentification, donc exploitable directement par VLC.
+     */
+    suspend fun taskFiles(id: String): List<FreeboxFile> = withContext(Dispatchers.IO) {
+        ensureSession()
+        val element = runCatching { authCall("/downloads/$id/files", "GET", null) }.getOrNull()
+            ?: return@withContext emptyList()
+        (element as? JsonArray)?.mapNotNull { it.asFileOrNull() } ?: emptyList()
+    }
+
     /** Supprime une tache ; `erase` efface aussi les fichiers telecharges. */
     suspend fun deleteTask(id: String, erase: Boolean = false): Unit = withContext(Dispatchers.IO) {
         ensureSession()
@@ -409,6 +428,21 @@ class FreeboxApi {
         ensureSession()
         val element = authCall("/downloads/", "GET", null)
         (element as? JsonArray)?.mapNotNull { it.asTaskOrNull() } ?: emptyList()
+    }
+
+    /**
+     * Verifie qu'un lien de partage repond vraiment (2xx) avant de lancer un lecteur :
+     * un lien mort donnerait un VLC ouvert sur une adresse muette.
+     */
+    suspend fun canStream(url: String): Boolean = withContext(Dispatchers.IO) {
+        runCatching {
+            val request = Request.Builder()
+                .url(url)
+                .header("Range", "bytes=0-0")
+                .get()
+                .build()
+            probeClient.newCall(request).execute().use { it.code in 200..299 }
+        }.getOrDefault(false)
     }
 
     /** Flux direct d'un fichier de la Freebox (pour VLC). Bloquant : appele depuis le proxy local. */
@@ -575,6 +609,29 @@ class FreeboxApi {
 
     private fun JsonElement.asTask(): FreeboxTask? = asTaskOrNull()
 
+    private fun JsonElement.asFileOrNull(): FreeboxFile? {
+        val obj = this as? JsonObject ?: return null
+        val name = obj["name"]?.jsonPrimitive?.contentOrNull ?: return null
+        val path = decodePath(obj["filepath"]?.jsonPrimitive?.contentOrNull)
+            .ifBlank { decodePath(obj["path"]?.jsonPrimitive?.contentOrNull) }
+        return FreeboxFile(
+            name = name,
+            path = path,
+            mimeType = obj["mimetype"]?.jsonPrimitive?.contentOrNull.orEmpty(),
+            size = obj["size"]?.jsonPrimitive?.longOrNull ?: 0L,
+            previewUrl = absoluteShareUrl(obj["preview_url"]?.jsonPrimitive?.contentOrNull),
+        )
+    }
+
+    /** Le lien de partage peut etre relatif : VLC a besoin d'une URL absolue. */
+    private fun absoluteShareUrl(url: String?): String? {
+        if (url.isNullOrBlank()) return null
+        if (url.startsWith("http://") || url.startsWith("https://")) return url
+        val base = baseUrl ?: return url
+        val origin = base.substringBefore("/api/", base)
+        return if (url.startsWith("/")) origin + url else "$origin/$url"
+    }
+
     private fun decodePath(raw: String?): String {
         if (raw.isNullOrBlank()) return ""
         if (raw.startsWith("/")) return raw
@@ -615,7 +672,7 @@ class FreeboxApi {
     companion object {
         const val APP_ID = "com.s3arch.app"
         const val APP_NAME = "S3ARCH"
-        const val APP_VERSION = "1.5.0"
+        const val APP_VERSION = "1.6.0"
         const val DEFAULT_DIR = "/Disque dur/S3ARCH"
     }
 }
