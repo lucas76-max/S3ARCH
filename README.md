@@ -1,6 +1,6 @@
 # S3ARCH
 
-**Version 1.8.0**
+**Version 1.0.0**
 
 Application Android **Material 3 Expressive** (avec **Material You** : couleurs dynamiques issues du
 fond d'écran sur Android 12+) pour chercher un contenu sur plusieurs trackers torrent
@@ -85,19 +85,19 @@ autre chemin, l'URL est modifiable dans l'app (bouton « URL » à côté de cha
 5. Les téléchargements partent avec `POST /downloads/add/` (`download_url` + `download_dir`
    encodé en base64) et la progression est lue sur `GET /downloads/`.
 
-Depuis la 1.3.0, le `.torrent` est envoyé en **fichier** (`download_file`, `multipart/form-data`) :
+Le `.torrent` est envoyé en **fichier** (`download_file`, `multipart/form-data`) :
 la Freebox n'a plus besoin d'atteindre le tracker, ce qui supprime la plupart des refus
 `invalid_url` et les blocages de trackers privés. Les liens sont aussi normalisés avant envoi
 (URL relative résolue sur le domaine du tracker, espaces encodés, entités HTML, magnets vérifiés).
 
-Depuis la 1.5.0, l'URL du `.torrent` n'est plus jamais passée en `download_url` : une URL
+L'URL du `.torrent` n'est jamais passée en `download_url` : une URL
 Torznab de type `?t=get&id=…` n'a pas d'extension `.torrent`, et la Freebox la traite comme un
 fichier ordinaire (elle enregistre le `.torrent` dans le dossier sans rien télécharger).
 Après création, l'app relit la tâche (`GET /downloads/{id}`) et vérifie `type == "bt"` ;
 si la box a créé une tâche `http`, elle la supprime avec ses fichiers (`/downloads/{id}/erase`)
 et bascule sur le magnet.
 
-Trois pièges de cette API, corrigés depuis la 1.2.0 :
+Trois pièges de cette API, déjà traités :
 
 - `/downloads/add/` **n'accepte pas de corps JSON** (réponse `invalid_request`). Contrairement au
   reste de l'API, ce endpoint attend un corps `application/x-www-form-urlencoded`.
@@ -140,7 +140,7 @@ en un tap.
 
 Une tâche BitTorrent porte presque toujours un **dossier** (`name`), pas un fichier : passer
 `dossier/nom` à VLC lui donne un répertoire, d'où un lecteur ouvert sur une adresse muette
-(« 127.0.0.1 ») et aucune lecture. La 1.6.0 demande donc à la Freebox la liste réelle des
+(« 127.0.0.1 ») et aucune lecture. L'app demande donc à la Freebox la liste réelle des
 fichiers de la tâche (`GET /downloads/{id}/files`), puis :
 
 1. garde le **plus gros média** (le film, pas le `.nfo`, les sous-titres ni l'échantillon de
@@ -151,13 +151,13 @@ fichiers de la tâche (`GET /downloads/{id}/files`), puis :
 3. à défaut, essaie le lien de partage `preview_url` en amont du proxy, puis
    `/fs/download/?path=` ; une session expirée (403) est renouvelée une fois.
 
-**Pourquoi le `preview_url` n'est plus donné tel quel (1.7.0)** : il répond bien 200, mais il
+**Pourquoi le `preview_url` n'est pas donné tel quel** : il répond bien 200, mais il
 pointe vers l'**accès distant** de la Freebox
 (`https://<nom>.freeboxos.fr:<port>/api/latest/btpreview/...`) et le lecteur refuse ce flux. Le
 proxy présente donc une URL HTTP simple, avec `Content-Type` issu de l'en-tête de la box ou à
 défaut de l'extension réelle du fichier, `Accept-Ranges` et `Content-Range` transmis.
 
-**Pourquoi le chargement pouvait être infini (1.8.0)** : deux comportements du proxy ont été
+**Pourquoi le chargement pouvait être infini** : deux comportements du proxy ont été
 corrigés. D'une part il n'invente plus de `Content-Length` — annoncer la taille de la tâche
 quand la box renvoie moins d'octets laissait le lecteur attendre une suite qui n'arrivait
 jamais ; sans longueur connue, la réponse part désormais en `Transfer-Encoding: chunked`, que
@@ -173,7 +173,7 @@ lancement, ce qui remonte le message d'erreur exact au lieu d'un VLC vide. Le jo
 désormais le code HTTP et le `Content-Type` de **chaque** source tentée (`/dl/`, lien de
 partage, `/fs/download/`).
 
-**Piège corrigé en 1.6.1** : ce test de flux et le proxy s'exécutaient sur le thread principal.
+**Autre piège corrigé** : ce test de flux et le proxy s'exécutaient sur le thread principal.
 Android y interdit toute I/O réseau et lève `NetworkOnMainThreadException`, une exception
 **sans message** — le journal affichait donc un « Lecture impossible » sans la moindre piste.
 Toute la lecture (liste des fichiers, test du lien, proxy) tourne désormais sur `Dispatchers.IO`,
