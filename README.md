@@ -1,6 +1,6 @@
 # S3ARCH
 
-**Version 1.6.0**
+**Version 1.6.1**
 
 Application Android **Material 3 Expressive** (avec **Material You** : couleurs dynamiques issues du
 fond d'écran sur Android 12+) pour chercher un contenu sur plusieurs trackers torrent
@@ -137,14 +137,23 @@ fichiers de la tâche (`GET /downloads/{id}/files`), puis :
 1. garde le **plus gros média** (le film, pas le `.nfo`, les sous-titres ni l'échantillon de
    quelques Mo) ;
 2. vérifie que son `preview_url` — le lien de partage renvoyé par la Freebox, lisible **sans
-   authentification** — répond bien (requête `Range: bytes=0-0`) avant de le confier à VLC ;
-3. sinon, replie sur le mini-serveur HTTP local `127.0.0.1` qui relance la requête vers
-   `GET /api/vX/fs/download/?path=<chemin base64>` avec `X-Fbx-App-Auth` et relaie le flux
-   (200/206) ainsi que `Content-Range` / `Content-Length`.
+   authentification** — répond bien avant de le confier à VLC (avec `Range: bytes=0-0`, puis
+   sans cet en-tête, que certains firmwares refusent sur un lien de partage) ;
+3. sinon, replie sur le mini-serveur HTTP local `127.0.0.1` qui relaie `GET /api/vX/dl/<chemin
+   base64>` avec `X-Fbx-App-Auth` (repli `/fs/download/?path=`, renouvellement de session sur
+   403), en transmettant 200/206 ainsi que `Content-Range` / `Content-Length`.
 
 L'URL locale a la forme `http://127.0.0.1:<port>/v/<jeton>/<nom-du-fichier>` : le nom réel
 termine l'URL (le lecteur affiche donc le film, pas « 127.0.0.1 ») et le flux est testé avant
 lancement, ce qui remonte le message d'erreur exact au lieu d'un VLC vide.
+
+**Piège corrigé en 1.6.1** : ce test de flux et le proxy s'exécutaient sur le thread principal.
+Android y interdit toute I/O réseau et lève `NetworkOnMainThreadException`, une exception
+**sans message** — le journal affichait donc un « Lecture impossible » sans la moindre piste.
+Toute la lecture (liste des fichiers, test du lien, proxy) tourne désormais sur `Dispatchers.IO`,
+et les erreurs sont journalisées avec leur type et leur pile. Les tests JVM de
+`VlcProxyServerTest` exercent le proxy sur de vrais sockets (relais, `Range`, 404, refus de la
+box) : c'est ce qui garantit que le flux sort vraiment du serveur local.
 
 VLC est lancé par Intent (`org.videolan.vlc`) ; si VLC n'est pas installé, le sélecteur de
 lecteurs Android est proposé. Le journal (Réglages → Journaux) indique le fichier retenu et

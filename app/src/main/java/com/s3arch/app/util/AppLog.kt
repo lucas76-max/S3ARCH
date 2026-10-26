@@ -38,6 +38,22 @@ object AppLog {
     fun warn(tag: String, message: String) = add(LogLevel.WARN, tag, message)
     fun error(tag: String, message: String) = add(LogLevel.ERROR, tag, message)
 
+    /**
+     * Journalise une exception avec son type et les premieres frames de la pile.
+     *
+     * Une exception Android comme [android.os.NetworkOnMainThreadException] n'a
+     * **aucun message** : sans le type et la pile, le journal affichait un simple
+     * « Lecture impossible » impossible a diagnostiquer.
+     */
+    fun throwable(tag: String, context: String, error: Throwable) {
+        val detail = error.message?.takeIf { it.isNotBlank() } ?: "(sans message)"
+        error(tag, "$context : ${error.javaClass.simpleName}: $detail")
+        val frames = error.stackTrace
+            .take(4)
+            .joinToString(" <-") { "${it.className.substringAfterLast('.')}.${it.methodName}:${it.lineNumber}" }
+        if (frames.isNotBlank()) error(tag, frames)
+    }
+
     @Synchronized
     private fun add(level: LogLevel, tag: String, message: String) {
         val entry = LogEntry(

@@ -5,6 +5,7 @@ import com.s3arch.app.util.AppLog
 import com.s3arch.app.util.DownloadUrls
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -430,27 +431,54 @@ class FreeboxApi {
         (element as? JsonArray)?.mapNotNull { it.asTaskOrNull() } ?: emptyList()
     }
 
+    /** Resultat du test d'un lien avant de le confier a un lecteur. */
+    data class StreamProbe(val ok: Boolean, val detail: String)
+
     /**
-     * Verifie qu'un lien de partage repond vraiment (2xx) avant de lancer un lecteur :
+     * Verifie qu'un lien de partage repond vraiment avant de lancer un lecteur :
      * un lien mort donnerait un VLC ouvert sur une adresse muette.
+     *
+     * Deux tentatives : avec `Range` (comme le fait un lecteur), puis sans, car
+     * certaines versions de la Freebox refusent l'en-tete sur un lien de partage.
+     * Le detail (code HTML ou exception) est journalise pour ne plus diagnostiquer
+     * « injoignable » a l'aveugle.
      */
-    suspend fun canStream(url: String): Boolean = withContext(Dispatchers.IO) {
-        runCatching {
-            val request = Request.Builder()
-                .url(url)
-                .header("Range", "bytes=0-0")
-                .get()
-                .build()
-            probeClient.newCall(request).execute().use { it.code in 200..299 }
-        }.getOrDefault(false)
+    suspend fun probeStream(url: String): StreamProbe = withContext(Dispatchers.IO) {
+        fun attempt(withRange: Boolean): StreamProbe = try {
+            val builder = Request.Builder().url(url).get()
+            if (withRange) builder.header("Range", "bytes=0-0")
+            probeClient.newCall(builder.build()).execute().use { response ->
+                when {
+                    response.code == 416 -> StreamProbe(true, "HTTP 416 (lien valide)")
+                    response.isSuccessful -> StreamProbe(true, "HTTP ${response.code}")
+                    else -> StreamProbe(false, "HTTP ${response.code} ${response.message}")
+                }
+            }
+        } catch (e: Exception) {
+            StreamProbe(false, "${e.javaClass.simpleName}: ${e.message ?: "sans message"}")
+        }
+
+        val first = attempt(true)
+        if (first.ok) {
+            first
+        } else {
+            val second = attempt(false)
+            if (second.ok) second else second.copy(detail = "${first.detail} / sans Range : ${second.detail}")
+        }
     }
 
-    /** Flux direct d'un fichier de la Freebox (pour VLC). Bloquant : appele depuis le proxy local. */
+    /**
+     * Flux direct d'un fichier de la Freebox (pour VLC). Bloquant : appele depuis le
+     * proxy local, jamais depuis le thread principal.
+     *
+     * `/dl/{path base64}` est l'endpoint documente ; `/fs/download/?path=` sert de
+     * repli pour les firmwares qui ne l'exposent plus. Une session expiree (403) est
+     * renouvelee une fois avant de renoncer.
+     */
     fun openFileBlocking(encodedPath: String, range: String?): Response {
-        val base = baseUrl ?: throw FreeboxException("Freebox non connectee")
-        val token = sessionToken ?: throw FreeboxException("Session Freebox absente")
-
         fun request(pathPrefix: String): Response {
+            val base = baseUrl ?: throw FreeboxException("Freebox non connectee")
+            val token = sessionToken ?: throw FreeboxException("Session Freebox absente")
             val parsed = base.toHttpUrlOrNull() ?: throw FreeboxException("URL Freebox invalide")
             val builder = parsed.newBuilder()
             if (pathPrefix == "dl") {
@@ -468,12 +496,29 @@ class FreeboxApi {
             return streamClient.newCall(req).execute()
         }
 
-        val response = request("dl")
-        if (response.code == 404) {
-            response.close()
-            return request("fs")
+        fun open(prefix: String, retried: Boolean): Response {
+            val response = request(prefix)
+            AppLog.info(
+                "Lecture",
+                "Flux /$prefix/ -> HTTP ${response.code} ${response.message}" +
+                    " (${response.header("Content-Type") ?: "type inconnu"})",
+            )
+            if (response.code == 403 && !retried) {
+                response.close()
+                runCatching { runBlocking { renewSession() } }
+                    .onFailure { AppLog.warn("Lecture", "Renouvellement de session impossible : ${it.message}") }
+                return open(prefix, retried = true)
+            }
+            return response
         }
-        return response
+
+        val primary = open("dl", retried = false)
+        if (primary.code == 404 || primary.code == 400) {
+            primary.close()
+            AppLog.warn("Lecture", "/dl/ refuse ce chemin, essai de /fs/download/")
+            return open("fs", retried = false)
+        }
+        return primary
     }
 
     // ------------------------------------------------------------------ HTTP interne

@@ -23,6 +23,7 @@ import com.s3arch.app.data.playableMedia
 import com.s3arch.app.util.AppLog
 import com.s3arch.app.util.DownloadUrls
 import com.s3arch.app.util.VlcLauncher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -31,6 +32,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 enum class FreeboxStatus { Idle, Connecting, WaitingApproval, Connected, Error }
 
@@ -344,45 +346,64 @@ class S3archViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             try {
                 ensureFreebox()
-                val task = _state.value.tasks[download.taskId] ?: freebox.task(download.taskId)
-                val folder = task?.downloadDir?.takeIf { it.isNotBlank() } ?: download.folder
-                val files = freebox.taskFiles(download.taskId)
-                val media = files.playableMedia()
-                val title = media?.name ?: task?.name?.takeIf { it.isNotBlank() } ?: download.title
+                // Tout le travail reseau (liste des fichiers, test du lien, proxy local)
+                // se fait hors du thread principal : un appel bloquant sur le main thread
+                // leve NetworkOnMainThreadException, qui n'a aucun message — d'ou
+                // l'ancien « Lecture impossible » sans la moindre piste.
+                val target = withContext(Dispatchers.IO) {
+                    val task = _state.value.tasks[download.taskId] ?: freebox.task(download.taskId)
+                    val folder = task?.downloadDir?.takeIf { it.isNotBlank() } ?: download.folder
+                    val files = freebox.taskFiles(download.taskId)
+                    AppLog.info("Lecture", "Tache ${download.taskId} : ${files.size} fichier(s)")
+                    val media = files.playableMedia()
+                    val title = media?.name ?: task?.name?.takeIf { it.isNotBlank() } ?: download.title
 
-                // 1. Lien de partage Freebox : VLC l'ouvre sans en-tete d'authentification.
-                val share = media?.previewUrl
-                if (!share.isNullOrBlank()) {
-                    if (freebox.canStream(share)) {
-                        AppLog.info("Lecture", "« $title » via le lien de partage Freebox")
-                        AppLog.info("Lecture", share)
-                        if (VlcLauncher.play(context, share, title)) return@launch
+                    // 1. Lien de partage Freebox : VLC l'ouvre sans en-tete d'authentification.
+                    val share = media?.previewUrl
+                    if (!share.isNullOrBlank()) {
+                        val probe = freebox.probeStream(share)
+                        AppLog.info("Lecture", "Lien de partage : ${probe.detail} — $share")
+                        if (probe.ok) return@withContext PlayTarget(share, title, shared = true)
                     } else {
-                        AppLog.warn("Lecture", "Lien de partage injoignable, repli sur le proxy local")
+                        AppLog.warn("Lecture", "Aucun lien de partage pour ce fichier, repli sur le proxy local")
                     }
+
+                    // 2. Repli : proxy local sur le fichier exact (jamais le dossier du torrent).
+                    val path = media?.path?.takeIf { it.isNotBlank() }
+                        ?: "${folder.trimEnd('/')}/${task?.name ?: download.title}"
+                    AppLog.info("Lecture", "Fichier : $path")
+                    val port = proxy.start { encodedPath, range -> freebox.openFileBlocking(encodedPath, range) }
+                    val encodedPath = Base64.encodeToString(path.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
+                    val localPath = proxy.publish(encodedPath, title)
+                    val code = proxy.probe(port, localPath)
+                    PlayTarget(proxy.urlFor(port, localPath), title, shared = false, code = code)
                 }
 
-                // 2. Repli : proxy local sur le fichier exact (jamais le dossier du torrent).
-                val path = media?.path?.takeIf { it.isNotBlank() }
-                    ?: "${folder.trimEnd('/')}/${task?.name ?: download.title}"
-                AppLog.info("Lecture", "Fichier : $path")
-                val port = proxy.start { encodedPath, range -> freebox.openFileBlocking(encodedPath, range) }
-                val encodedPath = Base64.encodeToString(path.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
-                val localPath = proxy.publish(encodedPath, title)
-                val code = proxy.probe(port, localPath)
-                val url = proxy.urlFor(port, localPath)
-                AppLog.info("Lecture", "Proxy local HTTP $code — $url")
-                if (!VlcLauncher.play(context, url, title)) {
+                AppLog.info(
+                    "Lecture",
+                    if (target.shared) "« ${target.title} » via le lien de partage Freebox"
+                    else "« ${target.title} » via le proxy local (HTTP ${target.code})",
+                )
+                AppLog.info("Lecture", target.url)
+                if (!VlcLauncher.play(context, target.url, target.title)) {
                     message("Aucun lecteur vidéo trouvé : installez VLC pour lire ce fichier")
                 }
             } catch (e: Exception) {
-                AppLog.error("Lecture", e.message ?: "Lecture impossible")
-                message(e.message ?: "Lecture impossible")
+                AppLog.throwable("Lecture", "Lecture impossible", e)
+                message(e.message?.takeIf { it.isNotBlank() } ?: "Lecture impossible : ${e.javaClass.simpleName}")
             } finally {
                 _state.update { it.copy(playingId = null) }
             }
         }
     }
+
+    /** Cible de lecture retenue : lien de partage Freebox ou proxy local. */
+    private data class PlayTarget(
+        val url: String,
+        val title: String,
+        val shared: Boolean,
+        val code: Int = 0,
+    )
 
     // ------------------------------------------------------------------ Freebox
 
