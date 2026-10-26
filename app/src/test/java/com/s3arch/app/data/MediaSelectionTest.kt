@@ -57,4 +57,37 @@ class MediaSelectionTest {
         val media = listOf(file("film.mkv", 5L)).playableMedia()
         assertEquals("/Disque dur/S3ARCH/film/film.mkv", media?.path)
     }
+
+    @Test
+    fun `un chemin absolu est conserve tel quel`() {
+        assertEquals(
+            "/Calinette/Téléchargements/S3ARCH/film/film.mkv",
+            freeboxPath(
+                folder = "/Calinette/Téléchargements/S3ARCH/",
+                name = "The.Exorcist.mkv",
+                declared = "/Calinette/Téléchargements/S3ARCH/film/film.mkv",
+            ),
+        )
+    }
+
+    /** Certains firmwares ne renvoient qu'un nom relatif : sans le dossier, `/dl/` echoue. */
+    @Test
+    fun `un chemin relatif est rattache au dossier de la tache`() {
+        assertEquals(
+            "/Calinette/Téléchargements/S3ARCH/film/film.mkv",
+            freeboxPath(
+                folder = "/Calinette/Téléchargements/S3ARCH/",
+                name = "film",
+                declared = "film/film.mkv",
+            ),
+        )
+    }
+
+    @Test
+    fun `un chemin absent retombe sur le dossier et le nom de la tache`() {
+        assertEquals(
+            "/Disque dur/S3ARCH/Mon.Film",
+            freeboxPath(folder = "/Disque dur/S3ARCH", name = "Mon.Film", declared = "  "),
+        )
+    }
 }

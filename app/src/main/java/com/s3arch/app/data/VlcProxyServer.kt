@@ -1,5 +1,6 @@
 package com.s3arch.app.data
 
+import com.s3arch.app.util.AppLog
 import okhttp3.Response
 import java.io.BufferedOutputStream
 import java.io.InputStream
@@ -141,6 +142,13 @@ class VlcProxyServer {
                         range = line.substringAfter(':').trim()
                     }
                 }
+                // Ce que le lecteur demande reellement : indispensable pour comprendre
+                // un chargement infini (le lecteur peut demander un Range precis).
+                AppLog.info(
+                    "Proxy",
+                    "$method ${target.substringBefore('?').take(140)}" +
+                        (range?.let { " · Range: $it" } ?: " · sans Range"),
+                )
 
                 // /v/<jeton>/<nom-du-fichier>
                 val segments = target.substringBefore('?').trim('/').split('/')
@@ -174,22 +182,40 @@ class VlcProxyServer {
     }
 
     private fun relay(socket: Socket, upstream: Response, source: StreamSource, method: String) {
+        val started = System.currentTimeMillis()
         val out = BufferedOutputStream(socket.getOutputStream())
         val body = upstream.body
-        val contentType = upstream.header("Content-Type")?.takeIf { it.isNotBlank() && !it.startsWith("text/html") }
+        // Le type peut venir de l'en-tete HTTP ou du corps (selon la couche qui a produit
+        // la reponse) : on regarde les deux avant de decider que c'est bien un media.
+        val upstreamType = upstream.header("Content-Type").orEmpty()
+        val bodyType = body?.contentType()?.toString().orEmpty()
+
+        // Une page HTML/JSON renvoyee avec un code 200 (erreur applicative de la box)
+        // n'est pas un media : la relayer laissait le lecteur attendre des octets qui
+        // n'arriveraient jamais, d'ou un chargement infini sans la moindre erreur.
+        val pageInsteadOfMedia = listOf(upstreamType, bodyType)
+            .any { it.contains("html", true) || it.contains("json", true) }
+        if (upstream.isSuccessful && pageInsteadOfMedia) {
+            val text = runCatching { body?.string().orEmpty() }.getOrDefault("")
+            AppLog.warn("Proxy", "Reponse ${upstreamType.ifBlank { bodyType }} au lieu du media : ${text.take(300)}")
+            writeError(
+                socket,
+                502,
+                text.take(300).ifBlank { "La Freebox a renvoyé une page au lieu du média" },
+            )
+            return
+        }
+
+        val contentType = upstreamType.takeIf { it.isNotBlank() && !it.startsWith("text/") }
             ?: contentTypeFor(source.name)
         val contentRange = upstream.header("Content-Range")
 
-        // Certains liens de partage repondent en chunked, sans Content-Length : VLC a
-        // alors besoin de la taille du fichier pour situer la lecture. On ne l'annonce
-        // que si la Freebox ne l'a pas deja fait et que la taille est connue et fiable,
-        // sinon une reponse plus courte que annonce ferait echouer le lecteur.
-        val upstreamLength = body?.contentLength() ?: -1L
-        val contentLength = when {
-            upstreamLength >= 0 -> upstreamLength
-            upstream.code == 200 && source.size > 0L -> source.size
-            else -> -1L
-        }
+        // On annonce **exactement** ce que la Freebox annonce. Inventer une taille
+        // (l'ancien repli sur `source.size`) promettait plus d'octets qu'il n'en arrivait
+        // quand la box repondait autrement : le lecteur restait bloque en chargement.
+        // Sans longueur connue, on passe en chunked, que VLC et Media3 gerent.
+        val contentLength = body?.contentLength() ?: -1L
+        val chunked = contentLength < 0
 
         val status = when {
             upstream.code == 416 -> "416 Range Not Satisfiable"
@@ -202,11 +228,14 @@ class VlcProxyServer {
             append("HTTP/1.1 ").append(status).append("\r\n")
             append("Content-Type: ").append(contentType).append("\r\n")
             append("Accept-Ranges: bytes\r\n")
+            append("Cache-Control: no-store\r\n")
             append("Connection: close\r\n")
             if (!contentRange.isNullOrBlank()) {
                 append("Content-Range: ").append(contentRange).append("\r\n")
             }
-            if (contentLength >= 0) {
+            if (chunked) {
+                append("Transfer-Encoding: chunked\r\n")
+            } else {
                 append("Content-Length: ").append(contentLength).append("\r\n")
             }
             append("\r\n")
@@ -214,18 +243,44 @@ class VlcProxyServer {
         out.write(headers.toByteArray(Charsets.ISO_8859_1))
         out.flush()
 
-        if (method == "HEAD" || !upstream.isSuccessful) return
+        if (method == "HEAD" || !upstream.isSuccessful) {
+            logSent(source, status, 0, started, chunked)
+            return
+        }
         val stream: InputStream = body?.byteStream() ?: return
-        stream.use { source ->
+        var sent = 0L
+        stream.use { input ->
             val buffer = ByteArray(64 * 1024)
             while (true) {
-                val read = source.read(buffer)
-                if (read <= 0) break
-                out.write(buffer, 0, read)
+                val read = input.read(buffer)
+                if (read < 0) break
+                if (read == 0) continue
+                if (chunked) {
+                    out.write((Integer.toHexString(read) + "\r\n").toByteArray(Charsets.ISO_8859_1))
+                    out.write(buffer, 0, read)
+                    out.write("\r\n".toByteArray(Charsets.ISO_8859_1))
+                } else {
+                    out.write(buffer, 0, read)
+                }
+                sent += read
                 out.flush()
             }
         }
+        if (chunked) {
+            out.write("0\r\n\r\n".toByteArray(Charsets.ISO_8859_1))
+            out.flush()
+        }
         runCatching { socket.shutdownOutput() }
+        logSent(source, status, sent, started, chunked)
+    }
+
+    private fun logSent(source: StreamSource, status: String, sent: Long, started: Long, chunked: Boolean) {
+        val millis = System.currentTimeMillis() - started
+        val mode = if (chunked) "chunked" else "taille fixe"
+        AppLog.info(
+            "Proxy",
+            "${source.name} -> $status · $sent octets en $millis ms ($mode)",
+        )
     }
 
     private fun writeError(socket: Socket, code: Int, message: String) {

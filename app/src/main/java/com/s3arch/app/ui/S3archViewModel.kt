@@ -19,9 +19,11 @@ import com.s3arch.app.data.TrackerException
 import com.s3arch.app.data.TrackerSource
 import com.s3arch.app.data.TrackedDownload
 import com.s3arch.app.data.VlcProxyServer
+import com.s3arch.app.data.freeboxPath
 import com.s3arch.app.data.playableMedia
 import com.s3arch.app.util.AppLog
 import com.s3arch.app.util.DownloadUrls
+import com.s3arch.app.ui.player.PlayerActivity
 import com.s3arch.app.util.VlcLauncher
 import com.s3arch.app.util.formatBytes
 import kotlinx.coroutines.Dispatchers
@@ -355,19 +357,24 @@ class S3archViewModel(app: Application) : AndroidViewModel(app) {
     // ------------------------------------------------------------------ lecture VLC
 
     /**
-     * Ouvre le media dans VLC.
+     * Lit le media dans le lecteur integre (Media3).
      *
-     * Une tache BitTorrent porte presque toujours un **dossier** (`name`) : on demande
-     * donc la liste reelle des fichiers (`/downloads/{id}/files`) et on garde le plus
-     * gros media.
-     *
-     * VLC recoit ensuite une URL **HTTP locale** servie par le proxy, alimentee en LAN
-     * par `GET /api/vX/dl/{base64}`. L'ancien choix — passer directement le `preview_url`
-     * a VLC — repondait bien 200 mais pointait vers l'acces distant de la box
-     * (`https://<nom>.freeboxos.fr:<port>/api/latest/btpreview/...`) : VLC refuse ce flux.
-     * Le lien de partage ne sert plus que de repli si le proxy echoue.
+     * VLC et le lecteur integre consomment la meme source : une URL **HTTP locale**
+     * servie par le proxy, alimentee en LAN par `GET /api/vX/dl/{base64}`. Le lecteur
+     * integre affiche en plus le code d'erreur exact quand le flux est refuse.
      */
-    fun play(context: Context, download: TrackedDownload) {
+    fun playInApp(context: Context, download: TrackedDownload) = launchPlayback(download) { target ->
+        PlayerActivity.start(context, target.url, target.title)
+    }
+
+    /** Lit le media dans VLC (le lecteur integre est le choix par defaut). */
+    fun playWithVlc(context: Context, download: TrackedDownload) = launchPlayback(download) { target ->
+        if (!VlcLauncher.play(context, target.url, target.title)) {
+            message("VLC n'est pas installé : utilisez « Lire dans S3ARCH »")
+        }
+    }
+
+    private fun launchPlayback(download: TrackedDownload, open: (PlayTarget) -> Unit) {
         if (_state.value.playingId != null) return
         _state.update { it.copy(playingId = download.taskId) }
         viewModelScope.launch {
@@ -377,65 +384,14 @@ class S3archViewModel(app: Application) : AndroidViewModel(app) {
                 // se fait hors du thread principal : un appel bloquant sur le main thread
                 // leve NetworkOnMainThreadException, qui n'a aucun message — d'ou
                 // l'ancien « Lecture impossible » sans la moindre piste.
-                val target = withContext(Dispatchers.IO) {
-                    val task = _state.value.tasks[download.taskId] ?: freebox.task(download.taskId)
-                    val folder = task?.downloadDir?.takeIf { it.isNotBlank() } ?: download.folder
-                    val files = freebox.taskFiles(download.taskId)
-                    AppLog.info("Lecture", "Tache ${download.taskId} : ${files.size} fichier(s)")
-                    val media = files.playableMedia()
-                    val title = media?.name ?: task?.name?.takeIf { it.isNotBlank() } ?: download.title
-
-                    val path = media?.path?.takeIf { it.isNotBlank() }
-                        ?: "${folder.trimEnd('/')}/${task?.name ?: download.title}"
-                    val size = media?.size ?: 0L
-                    AppLog.info("Lecture", "Fichier : $path (${formatBytes(size)})")
-
-                    // 1. Proxy local : VLC recoit du HTTP simple en 127.0.0.1, alimente
-                    //    par l'API fichiers de la box sur le reseau local.
-                    val encodedPath = Base64.encodeToString(path.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
-                    val source = VlcProxyServer.StreamSource(
-                        encodedPath = encodedPath,
-                        name = title,
-                        size = size,
-                        shareUrl = media?.previewUrl,
-                    )
-                    val port = proxy.start { stream, range -> freebox.openMediaBlocking(stream, range) }
-                    val localPath = proxy.publish(source)
-                    val localProbe = runCatching { proxy.probe(port, localPath) }
-                    localProbe.exceptionOrNull()?.let { error ->
-                        AppLog.warn("Lecture", "Proxy local en echec : ${error.message}")
-                    }
-                    if (localProbe.isSuccess) {
-                        return@withContext PlayTarget(
-                            proxy.urlFor(port, localPath),
-                            title,
-                            shared = false,
-                            code = localProbe.getOrDefault(200),
-                        )
-                    }
-
-                    // 2. Repli : lien de partage tel quel (acces distant HTTPS).
-                    val share = media?.previewUrl
-                    if (!share.isNullOrBlank()) {
-                        val probe = freebox.probeStream(share)
-                        AppLog.info("Lecture", "Lien de partage : ${probe.detail} — $share")
-                        if (probe.ok) return@withContext PlayTarget(share, title, shared = true)
-                    }
-                    throw FreeboxException(
-                        "La Freebox n'a pas fourni de flux lisible : " +
-                            (localProbe.exceptionOrNull()?.message ?: "proxy local indisponible"),
-                    )
-                }
-
+                val target = withContext(Dispatchers.IO) { resolvePlayback(download) }
                 AppLog.info(
                     "Lecture",
                     if (target.shared) "« ${target.title} » via le lien de partage Freebox"
                     else "« ${target.title} » via le proxy local (HTTP ${target.code})",
                 )
                 AppLog.info("Lecture", target.url)
-                if (!VlcLauncher.play(context, target.url, target.title)) {
-                    message("Aucun lecteur vidéo trouvé : installez VLC pour lire ce fichier")
-                }
+                open(target)
             } catch (e: Exception) {
                 AppLog.throwable("Lecture", "Lecture impossible", e)
                 message(e.message?.takeIf { it.isNotBlank() } ?: "Lecture impossible : ${e.javaClass.simpleName}")
@@ -443,6 +399,68 @@ class S3archViewModel(app: Application) : AndroidViewModel(app) {
                 _state.update { it.copy(playingId = null) }
             }
         }
+    }
+
+    /**
+     * Prepare la source de lecture.
+     *
+     * Une tache BitTorrent porte presque toujours un **dossier** (`name`) : on demande
+     * donc la liste reelle des fichiers (`/downloads/{id}/files`) et on garde le plus
+     * gros media, puis on publie son flux dans le proxy local.
+     */
+    private suspend fun resolvePlayback(download: TrackedDownload): PlayTarget {
+        val task = _state.value.tasks[download.taskId] ?: freebox.task(download.taskId)
+        val folder = task?.downloadDir?.takeIf { it.isNotBlank() } ?: download.folder
+        val files = freebox.taskFiles(download.taskId)
+        AppLog.info("Lecture", "Tache ${download.taskId} : ${files.size} fichier(s)")
+        val media = files.playableMedia()
+        val title = media?.name ?: task?.name?.takeIf { it.isNotBlank() } ?: download.title
+
+        // Un chemin relatif doit etre rattache au dossier de la tache, sinon
+        // `/dl/` ne trouve rien et l'on retombait sur l'acces distant.
+        val path = freeboxPath(
+            folder = folder,
+            name = task?.name?.takeIf { it.isNotBlank() } ?: download.title,
+            declared = media?.path,
+        )
+        val size = media?.size ?: 0L
+        AppLog.info("Lecture", "Fichier : $path (${formatBytes(size)})")
+
+        // 1. Proxy local : lecteur integre et VLC recoivent du HTTP simple en 127.0.0.1,
+        //    alimente par l'API fichiers de la box sur le reseau local.
+        val encodedPath = Base64.encodeToString(path.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
+        val source = VlcProxyServer.StreamSource(
+            encodedPath = encodedPath,
+            name = title,
+            size = size,
+            shareUrl = media?.previewUrl,
+        )
+        val port = proxy.start { stream, range -> freebox.openMediaBlocking(stream, range) }
+        val localPath = proxy.publish(source)
+        val localProbe = runCatching { proxy.probe(port, localPath) }
+        localProbe.exceptionOrNull()?.let { error ->
+            AppLog.warn("Lecture", "Proxy local en echec : ${error.message}")
+        }
+        if (localProbe.isSuccess) {
+            return PlayTarget(
+                proxy.urlFor(port, localPath),
+                title,
+                shared = false,
+                code = localProbe.getOrDefault(200),
+            )
+        }
+
+        // 2. Repli : lien de partage tel quel (acces distant HTTPS).
+        val share = media?.previewUrl
+        if (!share.isNullOrBlank()) {
+            val probe = freebox.probeStream(share)
+            AppLog.info("Lecture", "Lien de partage : ${probe.detail} — $share")
+            if (probe.ok) return PlayTarget(share, title, shared = true)
+        }
+        throw FreeboxException(
+            "La Freebox n'a pas fourni de flux lisible : " +
+                (localProbe.exceptionOrNull()?.message ?: "proxy local indisponible"),
+        )
     }
 
     /** Cible de lecture retenue : lien de partage Freebox ou proxy local. */

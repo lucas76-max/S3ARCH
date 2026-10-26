@@ -23,8 +23,8 @@ android {
         applicationId = "com.s3arch.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 10
-        versionName = "1.7.0"
+        versionCode = 11
+        versionName = "1.8.0"
     }
 
     signingConfigs {
@@ -87,6 +87,8 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("androidx.media3:media3-exoplayer:1.5.1")
+    implementation("androidx.media3:media3-ui:1.5.1")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 

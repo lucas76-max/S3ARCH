@@ -135,45 +135,71 @@ class VlcProxyServerTest {
         server.stop()
     }
 
+    private fun chunklessResponse(payload: String): Response {
+        val body = object : ResponseBody() {
+            override fun contentType() = "video/x-matroska".toMediaType()
+            override fun contentLength() = -1L
+            override fun source(): Buffer = Buffer().apply { writeUtf8(payload) }
+        }
+        return Response.Builder()
+            .request(Request.Builder().url("http://127.0.0.1/upstream").build())
+            .protocol(Protocol.HTTP_1_1)
+            .code(200)
+            .message("OK")
+            .body(body)
+            .build()
+    }
+
     /**
-     * Un flux `btpreview` peut repondre en chunked, sans `Content-Length` : VLC n'a alors
-     * aucune taille de reference. On annonce celle du fichier, connue par la tache.
+     * Un flux sans `Content-Length` doit partir en chunked.
+     *
+     * L'ancien code annoncait la taille de la tache : quand la Freebox renvoyait moins
+     * d'octets que annonce, le lecteur attendait la suite indefiniment. C'est ce
+     * chargement infini que ce test verrouille.
      */
     @Test
-    fun `une taille connue complete un flux sans Content-Length`() {
+    fun `un flux sans Content-Length part en chunked equilibre`() {
         val server = VlcProxyServer()
-        val port = server.start { _, _ ->
-            val body = object : ResponseBody() {
-                override fun contentType() = "video/x-matroska".toMediaType()
-                override fun contentLength() = -1L
-                override fun source(): Buffer = Buffer().apply { writeUtf8("MATROSKA") }
-            }
-            Response.Builder()
-                .request(Request.Builder().url("http://127.0.0.1/upstream").build())
-                .protocol(Protocol.HTTP_1_1)
-                .code(200)
-                .message("OK")
-                .body(body)
-                .build()
-        }
+        val port = server.start { _, _ -> chunklessResponse("MATROSKA") }
         val localPath = server.publish(source("film.mkv", size = 4_000_000_000L))
 
-        val head = get(port, localPath).substringBefore("\r\n\r\n")
+        val answer = get(port, localPath)
+        val head = answer.substringBefore("\r\n\r\n")
+        val body = answer.substringAfter("\r\n\r\n")
 
-        assertTrue("taille annoncee manquante : $head", head.contains("Content-Length: 4000000000"))
+        assertTrue("chunked attendu : $head", head.contains("Transfer-Encoding: chunked"))
+        assertTrue("aucune taille inventee : $head", !head.contains("Content-Length"))
+        assertEquals("8\r\nMATROSKA\r\n0\r\n\r\n", body)
         server.stop()
     }
 
-    /** Une page d'erreur HTML ne doit jamais arriver a VLC sous le type d'une video. */
+    /** Une page d'erreur HTML ne doit jamais arriver au lecteur sous le type d'une video. */
     @Test
-    fun `un type html est remplace par celui du fichier`() {
+    fun `une page html est signalee comme une erreur`() {
         val server = VlcProxyServer()
         val port = server.start { _, _ -> response(200, "<html>erreur</html>", contentType = "text/html") }
         val localPath = server.publish(source("film.mkv"))
 
-        val head = get(port, localPath).substringBefore("\r\n\r\n")
+        val answer = get(port, localPath)
 
-        assertTrue("type video attendu : $head", head.contains("Content-Type: video/x-matroska"))
+        assertTrue("502 attendu : $answer", answer.startsWith("HTTP/1.1 502"))
+        assertTrue("le motif doit remonter : $answer", answer.contains("erreur"))
+        server.stop()
+    }
+
+    /** Une erreur JSON de la box (HTTP 200) doit aussi produire une erreur explicite. */
+    @Test
+    fun `une reponse json est signalee comme une erreur`() {
+        val server = VlcProxyServer()
+        val port = server.start { _, _ ->
+            response(200, "{\"success\":false,\"error_code\":\"access_denied\"}", contentType = "application/json")
+        }
+        val localPath = server.publish(source("film.mkv"))
+
+        val answer = get(port, localPath)
+
+        assertTrue("502 attendu : $answer", answer.startsWith("HTTP/1.1 502"))
+        assertTrue("le motif doit remonter : $answer", answer.contains("access_denied"))
         server.stop()
     }
 }

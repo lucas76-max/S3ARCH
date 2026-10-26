@@ -24,6 +24,7 @@ import androidx.compose.material.icons.rounded.CloudDownload
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.DownloadDone
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.PlayCircleOutline
 import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.StopCircle
 import androidx.compose.material.icons.rounded.Timer
@@ -138,7 +139,8 @@ fun DownloadsScreen(state: UiState, vm: S3archViewModel) {
                         task = state.tasks[download.taskId],
                         playing = state.playingId == download.taskId,
                         busy = download.taskId in state.actionIds,
-                        onPlay = { vm.play(context, download) },
+                        onPlay = { vm.playInApp(context, download) },
+                        onPlayVlc = { vm.playWithVlc(context, download) },
                         onCancel = { vm.cancelDownload(download) },
                         onDelete = { confirmDelete = download },
                         onHide = { confirmHide = download },
@@ -214,6 +216,7 @@ private fun DownloadCard(
     playing: Boolean,
     busy: Boolean,
     onPlay: () -> Unit,
+    onPlayVlc: () -> Unit,
     onCancel: () -> Unit,
     onDelete: () -> Unit,
     onHide: () -> Unit,
@@ -379,7 +382,24 @@ private fun DownloadCard(
                         Icon(Icons.Rounded.PlayArrow, contentDescription = null, modifier = Modifier.size(20.dp))
                     }
                     Spacer(Modifier.size(8.dp))
-                    Text("Lire avec VLC", style = MaterialTheme.typography.labelLarge)
+                    Text("Lire dans S3ARCH", style = MaterialTheme.typography.labelLarge)
+                }
+                TextButton(
+                    onClick = onPlayVlc,
+                    enabled = !playing && !busy,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Icon(
+                        Icons.Rounded.PlayCircleOutline,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(Modifier.size(8.dp))
+                    Text(
+                        "Lire avec VLC",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             } else {
                 OutlinedButton(

@@ -1,12 +1,12 @@
 # S3ARCH
 
-**Version 1.7.0**
+**Version 1.8.0**
 
 Application Android **Material 3 Expressive** (avec **Material You** : couleurs dynamiques issues du
 fond d'écran sur Android 12+) pour chercher un contenu sur plusieurs trackers torrent
 (C411, TR4KER, V3X et tout endpoint Torznab tiers), lancer le téléchargement directement sur la
 **Freebox** via l'API officielle Freebox OS, suivre la progression en temps réel et lire le fichier
-avec **VLC**.
+dans un **lecteur intégré** (Media3/ExoPlayer) ou avec **VLC**.
 
 ## Fonctionnalités
 
@@ -130,7 +130,13 @@ demandée avant d'effacer sur le disque comme avant de masquer. Le masquage ne f
 à la Freebox : le transfert continue, les fichiers restent sur le disque et sont toujours
 visibles dans Freebox Files.
 
-## Lecture VLC
+## Lecture (lecteur intégré ou VLC)
+
+Le bouton **Lire dans S3ARCH** ouvre le lecteur intégré (Media3/ExoPlayer) ; **Lire avec VLC**
+reste disponible juste en dessous. Les deux consomment exactement la même source : l'URL HTTP
+locale du proxy. Le lecteur intégré a l'avantage de dire précisément ce qui échoue (« La Freebox
+a répondu HTTP 404 », « codec non pris en charge », « délai dépassé ») et propose un repli VLC
+en un tap.
 
 Une tâche BitTorrent porte presque toujours un **dossier** (`name`), pas un fichier : passer
 `dossier/nom` à VLC lui donne un répertoire, d'où un lecteur ouvert sur une adresse muette
@@ -145,12 +151,21 @@ fichiers de la tâche (`GET /downloads/{id}/files`), puis :
 3. à défaut, essaie le lien de partage `preview_url` en amont du proxy, puis
    `/fs/download/?path=` ; une session expirée (403) est renouvelée une fois.
 
-**Pourquoi le `preview_url` n'est plus donné tel quel à VLC (1.7.0)** : il répond bien 200,
-mais il pointe vers l'**accès distant** de la Freebox
-(`https://<nom>.freeboxos.fr:<port>/api/latest/btpreview/...`) et VLC refuse ce flux. Le proxy
-présente donc à VLC une URL HTTP simple, avec `Content-Type` issu de l'extension réelle du
-fichier (jamais `text/html`), `Accept-Ranges`, `Content-Range`/`Content-Length` transmis, et
-la taille du fichier annoncée quand la Freebox répond en chunked.
+**Pourquoi le `preview_url` n'est plus donné tel quel (1.7.0)** : il répond bien 200, mais il
+pointe vers l'**accès distant** de la Freebox
+(`https://<nom>.freeboxos.fr:<port>/api/latest/btpreview/...`) et le lecteur refuse ce flux. Le
+proxy présente donc une URL HTTP simple, avec `Content-Type` issu de l'en-tête de la box ou à
+défaut de l'extension réelle du fichier, `Accept-Ranges` et `Content-Range` transmis.
+
+**Pourquoi le chargement pouvait être infini (1.8.0)** : deux comportements du proxy ont été
+corrigés. D'une part il n'invente plus de `Content-Length` — annoncer la taille de la tâche
+quand la box renvoie moins d'octets laissait le lecteur attendre une suite qui n'arrivait
+jamais ; sans longueur connue, la réponse part désormais en `Transfer-Encoding: chunked`, que
+VLC comme Media3 gèrent. D'autre part une page HTML/JSON renvoyée avec un code 200 (erreur
+applicative de la box) ne peut plus sortir sous le type d'une vidéo : elle produit un `502`
+explicite. Le proxy journalise enfin chaque requête du lecteur (méthode, `Range` demandé) et le
+résultat (`status`, octets envoyés, durée, chunked ou taille fixe), ce qui rend un blocage
+lisible dans Réglages → Journaux.
 
 L'URL locale a la forme `http://127.0.0.1:<port>/v/<jeton>/<nom-du-fichier>` : le nom réel
 termine l'URL (le lecteur affiche donc le film, pas « 127.0.0.1 ») et le flux est testé avant
@@ -164,18 +179,19 @@ Android y interdit toute I/O réseau et lève `NetworkOnMainThreadException`, un
 Toute la lecture (liste des fichiers, test du lien, proxy) tourne désormais sur `Dispatchers.IO`,
 et les erreurs sont journalisées avec leur type et leur pile. Les tests JVM de
 `VlcProxyServerTest` exercent le proxy sur de vrais sockets (relais, `Range`, 404, refus de la
-box, taille annoncée sur un flux chunked, type HTML remplacé) : c'est ce qui garantit que le
-flux sort vraiment du serveur local.
+box, chunked correctement encadré, page HTML et erreur JSON transformées en 502) : c'est ce qui
+garantit que le flux sort vraiment du serveur local.
 
-VLC est lancé par Intent (`org.videolan.vlc`) ; si VLC n'est pas installé, le sélecteur de
-lecteurs Android est proposé. Le journal (Réglages → Journaux) indique le fichier retenu et
-l'URL utilisée.
+VLC est lancé par Intent (`org.videolan.vlc`) ; si VLC n'est pas installé, l'app propose le
+lecteur intégré. Le journal (Réglages → Journaux) indique le fichier retenu, l'URL utilisée et
+chaque requête servie par le proxy.
 
 ## Stack technique
 
 - Kotlin 2.0.21, Jetpack Compose (BOM 2024.12.01), Material 3, Navigation Compose
 - DataStore Preferences pour les clés/réglages et la liste des transferts
 - OkHttp 4.12 pour les appels trackers et Freebox
+- Media3 (ExoPlayer) 1.5.1 pour le lecteur vidéo intégré
 - kotlinx.serialization pour la persistance locale
 - minSdk 26, targetSdk 35, compileSdk 35, JDK 17, AGP 8.7.3 / Gradle 8.9
 

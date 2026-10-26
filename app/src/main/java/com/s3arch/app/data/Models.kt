@@ -268,6 +268,19 @@ fun List<FreeboxFile>.playableMedia(): FreeboxFile? =
     filter { it.isMedia && it.size > 0L }.maxByOrNull { it.size }
         ?: filter { it.isMedia }.maxByOrNull { it.size }
 
+/**
+ * Chemin absolu du fichier a lire.
+ *
+ * La liste `/downloads/{id}/files` renvoie normalement un chemin absolu, mais certains
+ * firmwares ne donnent qu'un nom relatif : sans le rattacher au dossier de la tache,
+ * `GET /dl/` ne trouvait rien et la lecture retombait sur l'acces distant.
+ */
+fun freeboxPath(folder: String, name: String, declared: String?): String {
+    val base = folder.trimEnd('/')
+    val value = declared?.trim()?.takeIf { it.isNotBlank() } ?: "$base/$name"
+    return if (value.startsWith("/")) value else "$base/$value"
+}
+
 /** Telechargement suivi par l'application (persiste entre deux lancements). */
 @Serializable
 data class TrackedDownload(
