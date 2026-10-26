@@ -1,6 +1,6 @@
 # S3ARCH
 
-**Version 1.3.0**
+**Version 1.4.0**
 
 Application Android **Material 3 Expressive** (avec **Material You** : couleurs dynamiques issues du
 fond d'écran sur Android 12+) pour chercher un contenu sur plusieurs trackers torrent
@@ -83,12 +83,19 @@ la Freebox n'a plus besoin d'atteindre le tracker, ce qui supprime la plupart de
 `invalid_url` et les blocages de trackers privés. Les liens sont aussi normalisés avant envoi
 (URL relative résolue sur le domaine du tracker, espaces encodés, entités HTML, magnets vérifiés).
 
-Deux pièges de cette API, corrigés depuis la 1.2.0 :
+Trois pièges de cette API, corrigés depuis la 1.2.0 :
 
 - `/downloads/add/` **n'accepte pas de corps JSON** (réponse `invalid_request`). Contrairement au
   reste de l'API, ce endpoint attend un corps `application/x-www-form-urlencoded`.
-- les chemins de l'API Freebox sont absolus et doivent **finir par `/`** (`download_dir` comme
-  `parent` de `/fs/mkdir/`) : `/Disque dur/S3ARCH/` et non `/Disque dur/S3ARCH`.
+- `download_dir` doit **finir par `/`** : `/Disque dur/S3ARCH/`.
+- `parent` de `/fs/mkdir/` doit au contraire **ne pas** finir par `/` :
+  `b64("/Disque dur")`, pas `b64("/Disque dur/")`. Avec le slash, la Freebox répond
+  `path_not_found`, le dossier n'est jamais créé, et le téléchargement accepté échoue ensuite
+  en `bt_file_error` (contexte du torrent non inscriptible).
+
+Si la création du dossier échoue quand même (disque absent, dossier système refusé), l'app se
+replie sur le dossier de téléchargement par défaut configuré dans la Freebox, puis sur son
+sous-dossier `S3ARCH`, et indique le chemin réellement utilisé dans les journaux.
 
 Le jeton d'application est conservé pour rouvrir une session silencieusement au prochain
 lancement ; la réautorisation n'est nécessaire qu'après révocation côté Freebox.
@@ -131,6 +138,8 @@ Play Store, et conservez-le si vous voulez continuer à mettre à jour l'app ins
 - Les endpoints Torznab de V3X et C411 peuvent évoluer : ils sont modifiables dans l'app.
 - Le refus `invalid_url` dépend du lien fourni par chaque tracker : le journal des réglages
   affiche l'URL exacte envoyée (passkey masquée) pour diagnostiquer un cas restant.
+- `bt_file_error` signifie que la Freebox n'a pas pu écrire dans le dossier cible (dossier
+  absent, disque non monté ou plein) : le journal indique le chemin utilisé et la raison.
 - L'app n'a pas pu être testée contre une Freebox réelle depuis l'environnement de build ;
   le flux d'autorisation, le format des requêtes et les endpoints suivent la documentation
   officielle Freebox OS (`dev.freebox.fr/sdk/os/`).

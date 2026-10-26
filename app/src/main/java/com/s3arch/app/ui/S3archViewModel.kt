@@ -184,10 +184,16 @@ class S3archViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             try {
                 val settings = _state.value.settings
-                val folder = settings.freeboxDownloadDir
+                val requested = settings.freeboxDownloadDir
                 ensureFreebox(settings)
-                runCatching { freebox.ensureFolder(folder) }
-                    .onFailure { throw FreeboxException("Dossier « $folder » : ${it.message}") }
+                val folder = try {
+                    freebox.ensureFolder(requested)
+                } catch (e: Exception) {
+                    throw FreeboxException("Dossier « $requested » : ${e.message}")
+                }
+                if (folder.trimEnd('/') != requested.trim().trimEnd('/')) {
+                    AppLog.warn("Download", "Dossier demandé indisponible, repli sur $folder")
+                }
 
                 AppLog.info("Download", "« ${result.title} » (${result.trackerLabel})")
                 val taskId = launchDownload(result, folder)

@@ -195,26 +195,99 @@ class FreeboxApi {
     // ------------------------------------------------------------------ telechargements
 
     /**
-     * Cree (si besoin) le dossier de destination sur la Freebox.
-     * Les chemins de l'API Freebox doivent se terminer par un « / ».
+     * Cree (si besoin) le dossier de destination et renvoie le chemin reellement utilisable
+     * (toujours termine par un « / », comme l'exige `download_dir`).
+     *
+     * Attention : `/fs/mkdir/` attend un parent **sans** slash final (« /Disque dur »),
+     * alors que `download_dir` en exige un (« /Disque dur/S3ARCH/ »). Mettre le slash
+     * dans le parent fait echouer la creation (`path_not_found`), puis le telechargement
+     * echoue en `bt_file_error` faute de dossier.
      */
-    suspend fun ensureFolder(dir: String) = withContext(Dispatchers.IO) {
+    suspend fun ensureFolder(dir: String): String = withContext(Dispatchers.IO) {
         ensureSession()
-        var parent = "/"
-        for (part in normalizeDir(dir).split('/').filter { it.isNotBlank() }) {
-            runCatching {
+        val requested = normalizeDir(dir)
+        val first = tryCreateFolder(requested)
+        if (first.created && folderExists(requested)) return@withContext requested
+
+        AppLog.warn("Freebox", "Dossier $requested indisponible : recherche d'un repli")
+        val base = configuredDownloadDir() ?: first.deepest
+            ?: throw FreeboxException(
+                "Impossible de creer le dossier « $requested » sur la Freebox",
+                "mkdir_failed",
+            )
+
+        val target = normalizeDir(base + "S3ARCH")
+        if (tryCreateFolder(target).created && folderExists(target)) return@withContext target
+
+        AppLog.warn("Freebox", "Creation impossible : utilisation directe de $base")
+        base
+    }
+
+    private data class FolderAttempt(val created: Boolean, val deepest: String?)
+
+    /**
+     * Cree chaque niveau du chemin.
+     *
+     * `/fs/mkdir/` attend un parent SANS slash final : parent = b64("/Disque dur").
+     * La Freebox repond `access_denied` quand le dossier existe deja.
+     */
+    private suspend fun tryCreateFolder(target: String): FolderAttempt {
+        var current = ""
+        for ((parent, part) in FreeboxPaths.levels(target)) {
+            val label = if (parent == "/") "/$part" else "$parent/$part"
+            val outline = runCatching {
                 val payload = buildJsonObject {
                     put("parent", b64(parent))
                     put("dirname", part)
                 }
                 authCall("/fs/mkdir/", "POST", payload)
-            }.onFailure {
-                // « existe deja » est normal : le dossier est cree une seule fois.
-                AppLog.warn("Freebox", "mkdir $parent$part : ${it.message}")
             }
-            parent = "$parent$part/"
+            val error = outline.exceptionOrNull()
+            if (error != null) {
+                val code = (error as? FreeboxException)?.code
+                val alreadyThere = code == "access_denied" ||
+                    code == "destination_conflict" ||
+                    code == "eexist"
+                if (!alreadyThere) {
+                    AppLog.warn("Freebox", "mkdir $label : ${error.message}")
+                    return FolderAttempt(false, current.ifBlank { null }?.plus("/"))
+                }
+                AppLog.info("Freebox", "Dossier deja present : $label")
+            } else {
+                AppLog.info("Freebox", "Dossier cree : $label")
+            }
+            current = if (current.isBlank()) "/$part" else "$current/$part"
         }
-        Unit
+        return FolderAttempt(true, "$current/")
+    }
+
+    /**
+     * Verifie qu'un dossier existe vraiment (la Freebox repond `access_denied` aussi bien
+     * pour « deja present » que pour un refus reel). En cas de doute on considere qu'il existe.
+     */
+    private suspend fun folderExists(path: String): Boolean {
+        val encoded = b64(path.trimEnd('/'))
+        // Un base64 contenant « / » serait ambigu dans l'URL : on ne bloque pas.
+        if (encoded.contains('/')) return true
+        return try {
+            authCall("/fs/info/$encoded", "GET", null)
+            true
+        } catch (e: FreeboxException) {
+            e.code != "path_not_found"
+        } catch (e: Exception) {
+            true
+        }
+    }
+
+    /** Dossier de telechargement par defaut configure dans le gestionnaire de la Freebox. */
+    suspend fun configuredDownloadDir(): String? = withContext(Dispatchers.IO) {
+        ensureSession()
+        val result = runCatching { authCall("/downloads/config/", "GET", null) }.getOrNull()
+            ?: return@withContext null
+        val raw = result.jsonObject["download_dir"]?.jsonPrimitive?.contentOrNull ?: return@withContext null
+        val decoded = decodePath(raw).takeIf { it.isNotBlank() } ?: return@withContext null
+        AppLog.info("Freebox", "Dossier par defaut de la Freebox : $decoded")
+        normalizeDir(decoded)
     }
 
     /**
@@ -475,21 +548,13 @@ class FreeboxApi {
         return runCatching { String(Base64.decode(raw, Base64.DEFAULT)) }.getOrElse { raw }
     }
 
-    private fun b64(value: String): String =
-        Base64.encodeToString(value.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
+    private fun b64(value: String): String = FreeboxPaths.base64(value)
 
     /**
      * Les chemins Freebox sont absolus et se terminent obligatoirement par un « / ».
      * Un dossier sans slash final est refuse par /downloads/add/ (« invalid_request »).
      */
-    private fun normalizeDir(dir: String): String {
-        var value = dir.trim().replace("\\", "/")
-        if (value.isEmpty()) value = DEFAULT_DIR
-        while (value.contains("//")) value = value.replace("//", "/")
-        if (!value.startsWith("/")) value = "/$value"
-        if (!value.endsWith("/")) value = "$value/"
-        return value
-    }
+    private fun normalizeDir(dir: String): String = FreeboxPaths.normalizeDir(dir, DEFAULT_DIR)
 
     private fun normalizeHost(rawHost: String): String {
         var host = rawHost.trim()
@@ -517,7 +582,7 @@ class FreeboxApi {
     companion object {
         const val APP_ID = "com.s3arch.app"
         const val APP_NAME = "S3ARCH"
-        const val APP_VERSION = "1.3.0"
+        const val APP_VERSION = "1.4.0"
         const val DEFAULT_DIR = "/Disque dur/S3ARCH"
     }
 }
@@ -536,6 +601,10 @@ internal object SafeErrors {
         "invalid_file" -> "Fichier .torrent invalide ou illisible par la Freebox"
         "invalid_operation" -> "Operation invalide pour ce telechargement"
         "too_many_tasks" -> "Trop de telechargements dans la file de la Freebox"
+        "path_not_found" -> "Dossier introuvable sur la Freebox (disque non monte ?)"
+        "disk_unavailable" -> "Le disque de la Freebox n'est pas monte"
+        "access_denied" -> "Acces refuse a ce dossier par la Freebox"
+        "bt_file_error" -> "La Freebox n'a pas pu ecrire le torrent dans le dossier de destination"
         "exists" -> "Ce torrent est deja present dans la file Freebox"
         "hibernating" -> "Le gestionnaire de telechargement de la Freebox est en veille"
         else -> if (code.isNullOrBlank()) message else "$message ($code)"

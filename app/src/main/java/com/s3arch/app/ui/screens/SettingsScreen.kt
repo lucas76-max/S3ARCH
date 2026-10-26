@@ -454,7 +454,7 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
                             modifier = Modifier.size(16.dp),
                         )
                         Spacer(Modifier.size(8.dp))
-                        Text("S3ARCH 1.3.0 · Material 3 Expressive", style = MaterialTheme.typography.bodyMedium)
+                        Text("S3ARCH 1.4.0 · Material 3 Expressive", style = MaterialTheme.typography.bodyMedium)
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
