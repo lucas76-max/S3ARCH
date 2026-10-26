@@ -634,8 +634,9 @@ class S3archViewModel(app: Application) : AndroidViewModel(app) {
                     when {
                         refused ->
                             "La Freebox exige le droit « Paramètres » : ouvrez Freebox OS → " +
-                                "Paramètres de la Freebox → Gestion des applications → S3ARCH, " +
-                                "cochez « Paramètres », puis revenez appuyer sur « Créer le VPN »."
+                                "Paramètres de la Freebox → mode avancé → Gestion des accès → " +
+                                "Applications → S3ARCH, cochez « Modification des réglages de la " +
+                                "Freebox », puis revenez appuyer sur « Créer le VPN »."
                         else -> e.message?.takeIf { it.isNotBlank() } ?: "Création du VPN impossible"
                     },
                 )

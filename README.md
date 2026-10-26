@@ -229,8 +229,9 @@ L'API `vpn` est protégée par le droit **`settings`** : si l'application ne l'a
 réellement accordés (bloc `permissions` renvoyé par `POST /login/session/`) et, quand `settings`
 manque, affiche une carte explicite dans l'appairage **et** dans les réglages :
 
-1. Freebox OS (`mafreebox.freebox.fr`) → **Paramètres de la Freebox** → **Gestion des applications** ;
-2. application **S3ARCH** → cocher **Paramètres** → **Enregistrer** ;
+1. Freebox OS (`mafreebox.freebox.fr`) → **Paramètres de la Freebox** → **mode avancé** →
+   **Gestion des accès** → onglet **Applications** ;
+2. sélectionner **S3ARCH** → cocher **Modification des réglages de la Freebox** → **OK** ;
 3. revenir dans S3ARCH → **J'ai autorisé** : la session est rouverte (seul moment où la box
    renvoie les droits) et la création du VPN reprend automatiquement.
 

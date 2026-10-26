@@ -117,8 +117,9 @@ fun FreeboxRightsCard(
             )
             Text(
                 "1. Ouvrez Freebox OS (mafreebox.freebox.fr) depuis le réseau local.\n" +
-                    "2. Paramètres de la Freebox → Gestion des applications → S3ARCH.\n" +
-                    "3. Cochez « Paramètres », puis Enregistrer.\n" +
+                    "2. Paramètres de la Freebox → mode avancé → Gestion des accès → Applications.\n" +
+                    "3. Sélectionnez S3ARCH et cochez « Modification des réglages de la Freebox », " +
+                    "puis validez par OK.\n" +
                     "4. Revenez ici et appuyez sur « J'ai autorisé ».",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -219,8 +220,8 @@ fun VpnSettingsContent(
         if (state.needsSettingsRight) {
             Text(
                 "⚠️ La Freebox n'accorde pas encore le droit « Paramètres » : cochez-le dans " +
-                    "Freebox OS → Paramètres de la Freebox → Gestion des applications → S3ARCH, " +
-                    "puis appuyez sur « J'ai autorisé » ci-dessus.",
+                    "Freebox OS → Paramètres de la Freebox → mode avancé → Gestion des accès → " +
+                    "Applications → S3ARCH, puis appuyez sur « J'ai autorisé » ci-dessus.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.error,
             )
