@@ -24,14 +24,18 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.ArrowDownward
+import androidx.compose.material.icons.rounded.ArrowDropDown
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Clear
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.LeakAdd
 import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.SwapVert
 import androidx.compose.material.icons.rounded.TravelExplore
 import androidx.compose.material.icons.rounded.Upload
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -52,8 +56,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.s3arch.app.data.MediaType
+import com.s3arch.app.data.SortMode
 import com.s3arch.app.data.TorrentResult
 import com.s3arch.app.data.TrackerSource
+import com.s3arch.app.data.sortedFor
 import com.s3arch.app.ui.S3archViewModel
 import com.s3arch.app.ui.UiState
 import com.s3arch.app.ui.components.EmptyState
@@ -65,7 +72,20 @@ import com.s3arch.app.util.formatBytes
 @Composable
 fun SearchScreen(state: UiState, vm: S3archViewModel) {
     var query by rememberSaveable { mutableStateOf(state.query) }
+    var sortMenuOpen by remember { mutableStateOf(false) }
     val sources = state.settings.sources()
+
+    // Filtre facultatif par type de contenu (ensemble vide = tout afficher), puis tri choisi.
+    val activeTypes = state.settings.enabledTypes
+    val filtered = if (activeTypes.isEmpty()) {
+        state.results
+    } else {
+        state.results.filter { it.mediaType.id in activeTypes }
+    }
+    val visible = remember(filtered, state.settings.sortMode) {
+        filtered.sortedFor(state.settings.sortMode)
+    }
+    val hiddenByFilter = state.results.size - filtered.size
 
     Column(
         modifier = Modifier
@@ -143,26 +163,78 @@ fun SearchScreen(state: UiState, vm: S3archViewModel) {
 
             Spacer(Modifier.height(12.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    Icons.Rounded.ArrowDownward,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(14.dp),
-                )
-                Spacer(Modifier.size(6.dp))
-                Text(
-                    "Triés du plus petit au plus grand",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                Box {
+                    Surface(
+                        onClick = { sortMenuOpen = true },
+                        shape = RoundedCornerShape(50),
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            Icon(
+                                Icons.Rounded.SwapVert,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(15.dp),
+                            )
+                            Text(
+                                state.settings.sortMode.label,
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.onSurface,
+                            )
+                            Icon(
+                                Icons.Rounded.ArrowDropDown,
+                                contentDescription = "Changer le tri",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(16.dp),
+                            )
+                        }
+                    }
+                    DropdownMenu(
+                        expanded = sortMenuOpen,
+                        onDismissRequest = { sortMenuOpen = false },
+                    ) {
+                        SortMode.entries.forEach { mode ->
+                            DropdownMenuItem(
+                                text = { Text(mode.label) },
+                                onClick = {
+                                    vm.setSortMode(mode)
+                                    sortMenuOpen = false
+                                },
+                                leadingIcon = {
+                                    if (mode == state.settings.sortMode) {
+                                        Icon(
+                                            Icons.Rounded.Check,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(18.dp),
+                                        )
+                                    } else {
+                                        Spacer(Modifier.size(18.dp))
+                                    }
+                                },
+                            )
+                        }
+                    }
+                }
                 Spacer(Modifier.weight(1f))
                 if (state.results.isNotEmpty()) {
                     Text(
-                        "${state.results.size} résultats",
+                        "${visible.size} résultats",
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.primary,
                     )
                 }
+            }
+            if (hiddenByFilter > 0) {
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "$hiddenByFilter masqué(s) par le filtre de types (Réglages → Types de contenus)",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
 
@@ -187,13 +259,22 @@ fun SearchScreen(state: UiState, vm: S3archViewModel) {
             }
         }
 
-        if (state.results.isEmpty() && !state.searching) {
+        if (visible.isEmpty() && !state.searching) {
             if (state.searched) {
-                EmptyState(
-                    icon = Icons.Rounded.Search,
-                    title = "Aucun résultat",
-                    subtitle = "Essayez un autre terme ou vérifiez vos clés API dans les réglages.",
-                )
+                if (hiddenByFilter > 0) {
+                    EmptyState(
+                        icon = Icons.Rounded.Search,
+                        title = "Aucun résultat pour ce filtre",
+                        subtitle = "$hiddenByFilter résultat(s) masqué(s) par le filtre de types. " +
+                            "Ajustez-le dans les réglages ou désactivez-le.",
+                    )
+                } else {
+                    EmptyState(
+                        icon = Icons.Rounded.Search,
+                        title = "Aucun résultat",
+                        subtitle = "Essayez un autre terme ou vérifiez vos clés API dans les réglages.",
+                    )
+                }
             } else {
                 EmptyState(
                     icon = Icons.Rounded.TravelExplore,
@@ -208,7 +289,7 @@ fun SearchScreen(state: UiState, vm: S3archViewModel) {
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 items(
-                    items = state.results,
+                    items = visible,
                     key = { "${it.trackerId}-${it.id}" },
                 ) { result ->
                     ResultCard(
@@ -288,6 +369,12 @@ private fun ResultCard(result: TorrentResult, pending: Boolean, onDownload: () -
                     modifier = Modifier.horizontalScroll(rememberScrollState()),
                 ) {
                     Pill(text = result.trackerLabel, tint = MaterialTheme.colorScheme.secondary)
+                    if (result.mediaType != MediaType.OTHER) {
+                        Pill(
+                            text = result.mediaType.label,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                     Pill(
                         text = formatBytes(result.sizeBytes),
                         tint = MaterialTheme.colorScheme.primary,

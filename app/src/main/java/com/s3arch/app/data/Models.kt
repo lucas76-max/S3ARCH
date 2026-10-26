@@ -1,6 +1,12 @@
 package com.s3arch.app.data
 
 import kotlinx.serialization.Serializable
+import java.time.Instant
+import java.time.LocalDateTime
+import java.time.OffsetDateTime
+import java.time.ZoneOffset
+import java.time.ZonedDateTime
+import java.time.format.DateTimeFormatter
 
 /** Les trois trackers integres. L'URL de base est modifiable dans les reglages. */
 enum class Tracker(
@@ -61,6 +67,112 @@ data class TrackerSource(
     val isConfigured: Boolean get() = apiKey.isNotBlank()
 }
 
+/** Type de contenu deduit des categories Torznab (utile pour le filtrage). */
+enum class MediaType(val id: String, val label: String) {
+    MOVIE("movie", "Films"),
+    SERIES("series", "Séries"),
+    MUSIC("music", "Musique"),
+    BOOK("book", "Ebooks"),
+    APP("app", "Applications"),
+    GAME("game", "Jeux"),
+    XXX("xxx", "XXX"),
+    OTHER("other", "Autres");
+
+    companion object {
+        fun fromId(id: String?): MediaType? = entries.firstOrNull { it.id == id }
+
+        /**
+         * Deduit le type depuis les identifiants Torznab (2000 = Films, 5000 = TV, ...),
+         * puis depuis le libelle de categorie, puis depuis des motifs tres explicites du titre.
+         */
+        fun infer(categoryIds: List<Int>, categoryText: String?, title: String): MediaType {
+            categoryIds.firstOrNull { it >= 1000 }?.let { id ->
+                when (id / 1000) {
+                    1 -> return GAME
+                    2 -> return MOVIE
+                    3 -> return MUSIC
+                    4 -> return APP
+                    5 -> return SERIES
+                    6 -> return XXX
+                    7 -> return BOOK
+                }
+            }
+
+            val haystack = (categoryText.orEmpty() + " " + title).lowercase()
+            when {
+                haystack.containsAny("xxx", "hentai", "porn", "adulte", "erotic") -> return XXX
+                haystack.containsAny(
+                    "serie", "série", "saison", "season", "episode", "épisode", "emission",
+                    "émission", "animation serie", "animé", "anime", "documentaire serie",
+                ) -> return SERIES
+                haystack.containsAny("film", "movie", "cinema", "cinéma", "documentaire", "concert", "spectacle", "sport") ->
+                    return MOVIE
+                haystack.containsAny("musique", "music", "album", "karaoke", "karaoké", "podcast", "sample", "audio") ->
+                    return MUSIC
+                haystack.containsAny("ebook", "livre", "book", "manga", "comics", " bd", "bd ", "presse", "epub") ->
+                    return BOOK
+                haystack.containsAny("logiciel", "application", "software", "windows", "macos", "linux", "android", "formation") ->
+                    return APP
+                haystack.containsAny("jeu", "game", "console", "nintendo", "playstation", "xbox", "rom", "emulation", "émulation") ->
+                    return GAME
+                SERIES_PATTERN.containsMatchIn(title) -> return SERIES
+                else -> return OTHER
+            }
+        }
+
+        private fun String.containsAny(vararg needles: String): Boolean =
+            needles.any { this.contains(it) }
+
+        private val SERIES_PATTERN = Regex("\\bS\\d{1,2}\\s?E\\d{1,3}\\b", RegexOption.IGNORE_CASE)
+    }
+}
+
+/** Ordre de tri des resultats. */
+enum class SortMode(val id: String, val label: String) {
+    SIZE_ASC("size_asc", "Taille croissante"),
+    SIZE_DESC("size_desc", "Taille décroissante"),
+    SEEDERS_DESC("seeders", "Seeders décroissants"),
+    RECENT("recent", "Plus récents"),
+    TITLE("title", "Nom A → Z");
+
+    companion object {
+        fun fromId(id: String?): SortMode = entries.firstOrNull { it.id == id } ?: SIZE_ASC
+    }
+}
+
+/** Applique l'ordre choisi ; les tailles inconnues restent en fin de liste. */
+fun List<TorrentResult>.sortedFor(mode: SortMode): List<TorrentResult> = when (mode) {
+    SortMode.SIZE_ASC -> sortedWith(
+        compareBy({ if (it.sizeBytes > 0) 0 else 1 }, { it.sizeBytes }, { it.title.lowercase() }),
+    )
+    SortMode.SIZE_DESC -> sortedWith(
+        compareBy({ if (it.sizeBytes > 0) 0 else 1 }, { -it.sizeBytes }, { it.title.lowercase() }),
+    )
+    SortMode.SEEDERS_DESC -> sortedWith(
+        compareByDescending<TorrentResult> { it.seeders }.thenBy { it.sizeBytes },
+    )
+    SortMode.RECENT -> sortedWith(
+        compareByDescending<TorrentResult> { parsePublishedAt(it.publishDate) }
+            .thenByDescending { it.seeders },
+    )
+    SortMode.TITLE -> sortedWith(
+        compareBy(String.CASE_INSENSITIVE_ORDER) { it.title },
+    )
+}
+
+private val RFC_1123 = DateTimeFormatter.RFC_1123_DATE_TIME
+
+/** Convertit la date de publication Torznab (RFC 822/1123, ISO) en epoch millis. */
+fun parsePublishedAt(raw: String?): Long {
+    if (raw.isNullOrBlank()) return 0L
+    val text = raw.trim()
+    runCatching { return OffsetDateTime.parse(text).toInstant().toEpochMilli() }
+    runCatching { return ZonedDateTime.parse(text, RFC_1123).toInstant().toEpochMilli() }
+    runCatching { return LocalDateTime.parse(text, RFC_1123).atZone(ZoneOffset.UTC).toInstant().toEpochMilli() }
+    runCatching { return Instant.parse(text).toEpochMilli() }
+    return 0L
+}
+
 /** Un resultat de recherche, normalise quel que soit le tracker. */
 data class TorrentResult(
     val id: String,
@@ -74,6 +186,7 @@ data class TorrentResult(
     val magnet: String? = null,
     val category: String? = null,
     val publishDate: String? = null,
+    val mediaType: MediaType = MediaType.OTHER,
 )
 
 /** Etat de la Freebox une fois decouverte. */
@@ -143,6 +256,9 @@ data class AppSettings(
     val freeboxDownloadDir: String = "/Disque dur/S3ARCH",
     val onboardingDone: Boolean = false,
     val dynamicColor: Boolean = true,
+    val sortMode: SortMode = SortMode.SIZE_ASC,
+    /** Types de contenus a afficher ; ensemble vide = aucun filtre. */
+    val enabledTypes: Set<String> = emptySet(),
 ) {
     fun keyFor(tracker: Tracker): String = when (tracker) {
         Tracker.C411 -> c411Key

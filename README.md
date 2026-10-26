@@ -1,6 +1,6 @@
 # S3ARCH
 
-**Version 1.1.0**
+**Version 1.2.0**
 
 Application Android **Material 3 Expressive** (avec **Material You** : couleurs dynamiques issues du
 fond d'écran sur Android 12+) pour chercher un contenu sur plusieurs trackers torrent
@@ -14,7 +14,12 @@ avec **VLC**.
   fusion des résultats.
 - **Trackers tiers** : ajout d'un endpoint Torznab personnalisé, avec avertissement explicite que
   la compatibilité n'est **pas garantie**.
-- **Tri automatique du plus petit au plus grand** (taille inconnue en fin de liste).
+- **Tri au choix** : taille croissante (par défaut), taille décroissante, seeders décroissants,
+  plus récents, nom A → Z. Le tri est mémorisé et s'applique instantanément, sans relancer la
+  recherche.
+- **Filtre facultatif par type de contenu** (Réglages → Types de contenus) : Films, Séries,
+  Musique, Ebooks, Applications, Jeux, XXX, Autres. Aucun type coché = tous les résultats ; le
+  nombre de résultats masqués est indiqué sous la barre de recherche.
 - **Transferts détaillés** : nombre de seeders du torrent et débit courant en **Mbps**, en plus du
   pourcentage, du volume et du temps restant.
 - **Clés API demandées au premier démarrage** puis enregistrées localement (modifiables
@@ -33,9 +38,9 @@ avec **VLC**.
 | Écran | Contenu |
 |---|---|
 | Configuration (1er lancement) | Étape 1 : clés API C411 / TR4KER / V3X (+ endpoint Torznab editable). Étape 2 : adresse Freebox + dossier + autorisation. |
-| Recherche | Barre de recherche, filtres par tracker, résultats triés par taille croissante, bouton de téléchargement. |
+| Recherche | Barre de recherche, filtres par tracker, sélecteur de tri, résultats filtrés par type, bouton de téléchargement. |
 | Transferts | Cartes de téléchargement avec progression temps réel, débit, ETA, bouton « Lire avec VLC ». |
-| Réglages | Clés API, trackers tiers Torznab, dossier Freebox, session/re-autorisation, couleurs dynamiques. |
+| Réglages | Clés API, trackers tiers Torznab, filtre par types de contenus, dossier Freebox, session/re-autorisation, couleurs dynamiques. |
 
 ## Trackers tiers (Torznab)
 
@@ -68,6 +73,13 @@ autre chemin, l'URL est modifiable dans l'app (bouton « URL » à côté de cha
    l'`app_token`), puis le dossier est créé avec `/fs/mkdir/`.
 5. Les téléchargements partent avec `POST /downloads/add/` (`download_url` + `download_dir`
    encodé en base64) et la progression est lue sur `GET /downloads/`.
+
+Deux pièges de cette API, corrigés depuis la 1.2.0 :
+
+- `/downloads/add/` **n'accepte pas de corps JSON** (réponse `invalid_request`). Contrairement au
+  reste de l'API, ce endpoint attend un corps `application/x-www-form-urlencoded`.
+- les chemins de l'API Freebox sont absolus et doivent **finir par `/`** (`download_dir` comme
+  `parent` de `/fs/mkdir/`) : `/Disque dur/S3ARCH/` et non `/Disque dur/S3ARCH`.
 
 Le jeton d'application est conservé pour rouvrir une session silencieusement au prochain
 lancement ; la réautorisation n'est nécessaire qu'après révocation côté Freebox.
@@ -109,5 +121,8 @@ Play Store, et conservez-le si vous voulez continuer à mettre à jour l'app ins
 
 - Les endpoints Torznab de V3X et C411 peuvent évoluer : ils sont modifiables dans l'app.
 - L'app n'a pas pu être testée contre une Freebox réelle depuis l'environnement de build ;
-  le flux d'autorisation et les endpoints suivent la documentation officielle Freebox OS.
+  le flux d'autorisation, le format des requêtes et les endpoints suivent la documentation
+  officielle Freebox OS (`dev.freebox.fr/sdk/os/`).
+- Le type d'un résultat est déduit des catégories Torznab ; un tracker qui n'en expose pas laisse
+  ses résultats en « Autres », donc le filtre par type peut les masquer.
 - Les clés API sont stockées en clair dans le DataStore privé de l'application (non chiffré).

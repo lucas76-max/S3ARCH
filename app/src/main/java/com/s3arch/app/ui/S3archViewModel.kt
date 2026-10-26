@@ -10,7 +10,9 @@ import com.s3arch.app.data.AppSettings
 import com.s3arch.app.data.FreeboxApi
 import com.s3arch.app.data.FreeboxException
 import com.s3arch.app.data.FreeboxTask
+import com.s3arch.app.data.MediaType
 import com.s3arch.app.data.SettingsRepository
+import com.s3arch.app.data.SortMode
 import com.s3arch.app.data.TorrentResult
 import com.s3arch.app.data.TorznabClient
 import com.s3arch.app.data.Tracker
@@ -106,6 +108,21 @@ class S3archViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setDynamicColor(enabled: Boolean) {
         viewModelScope.launch { repo.setDynamicColor(enabled) }
+    }
+
+    fun setSortMode(mode: SortMode) {
+        viewModelScope.launch { repo.setSortMode(mode) }
+    }
+
+    /** Filtre facultatif par type de contenu ; un ensemble vide affiche tout. */
+    fun toggleType(type: MediaType) {
+        val current = _state.value.settings.enabledTypes
+        val updated = if (type.id in current) current - type.id else current + type.id
+        viewModelScope.launch { repo.setEnabledTypes(updated) }
+    }
+
+    fun clearTypeFilter() {
+        viewModelScope.launch { repo.setEnabledTypes(emptySet()) }
     }
 
     fun search(query: String = _state.value.query) {

@@ -38,6 +38,8 @@ class SettingsRepository(private val context: Context) {
             freeboxDownloadDir = prefs[FB_DIR] ?: "/Disque dur/S3ARCH",
             onboardingDone = prefs[ONBOARDING] ?: false,
             dynamicColor = prefs[DYNAMIC_COLOR] ?: true,
+            sortMode = SortMode.fromId(prefs[SORT_MODE]),
+            enabledTypes = prefs[TYPES] ?: emptySet(),
         )
     }
 
@@ -94,6 +96,14 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setDynamicColor(enabled: Boolean) {
         context.dataStore.edit { it[DYNAMIC_COLOR] = enabled }
+    }
+
+    suspend fun setSortMode(mode: SortMode) {
+        context.dataStore.edit { it[SORT_MODE] = mode.id }
+    }
+
+    suspend fun setEnabledTypes(types: Set<String>) {
+        context.dataStore.edit { it[TYPES] = types }
     }
 
     suspend fun completeOnboarding() {
@@ -157,5 +167,7 @@ class SettingsRepository(private val context: Context) {
         val FB_DIR = stringPreferencesKey("freebox_download_dir")
         val ONBOARDING = booleanPreferencesKey("onboarding_done")
         val DYNAMIC_COLOR = booleanPreferencesKey("dynamic_color")
+        val SORT_MODE = stringPreferencesKey("sort_mode")
+        val TYPES = stringSetPreferencesKey("enabled_types")
     }
 }

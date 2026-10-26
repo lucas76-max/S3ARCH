@@ -114,10 +114,20 @@ class TorznabClient {
                                 if (!url.isNullOrBlank()) enclosure = url.trim()
                             }
                             name == "attr" && attrs != null -> {
-                                val attrName = parser.getAttributeValue(null, "name")
+                                val attrName = parser.getAttributeValue(null, "name")?.lowercase()
                                 val attrValue = parser.getAttributeValue(null, "value")
                                 if (!attrName.isNullOrBlank() && attrValue != null) {
-                                    attrs[attrName.lowercase()] = attrValue
+                                    if (attrName == "category" && attrValue.trim().all { it.isDigit() }) {
+                                        // Plusieurs categories possibles : on les accumule.
+                                        val previous = attrs["categoryids"]
+                                        attrs["categoryids"] = if (previous.isNullOrBlank()) {
+                                            attrValue.trim()
+                                        } else {
+                                            "$previous,${attrValue.trim()}"
+                                        }
+                                    } else {
+                                        attrs[attrName] = attrValue
+                                    }
                                 }
                             }
                         }
@@ -187,6 +197,12 @@ class TorznabClient {
             ?: attrs["infohash"]
             ?: "$title-$size"
 
+        val categoryIds = attrs["categoryids"]
+            ?.split(',')
+            ?.mapNotNull { it.trim().toIntOrNull() }
+            .orEmpty()
+        val categoryText = values["category"]?.trim()?.takeIf { it.isNotBlank() }
+
         return TorrentResult(
             id = id,
             title = title,
@@ -197,8 +213,9 @@ class TorznabClient {
             trackerLabel = source.label,
             downloadUrl = downloadUrl,
             magnet = magnet,
-            category = values["category"]?.trim()?.takeIf { it.isNotBlank() },
+            category = categoryText,
             publishDate = values["pubdate"]?.trim(),
+            mediaType = MediaType.infer(categoryIds, categoryText, title),
         )
     }
 

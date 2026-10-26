@@ -4,6 +4,8 @@ import android.os.Build
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -20,6 +22,7 @@ import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.Button
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -36,6 +39,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.s3arch.app.data.MediaType
 import com.s3arch.app.data.Tracker
 import com.s3arch.app.data.TrackerSource
 import com.s3arch.app.ui.FreeboxStatus
@@ -48,6 +52,7 @@ import com.s3arch.app.ui.components.SectionCard
 import com.s3arch.app.ui.components.StatusDot
 import com.s3arch.app.ui.components.TrackerKeyEditor
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun SettingsScreen(state: UiState, vm: S3archViewModel) {
     var c411Key by rememberSaveable { mutableStateOf(state.settings.c411Key) }
@@ -216,6 +221,43 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
         item {
             SectionCard(
                 modifier = Modifier.padding(horizontal = 16.dp),
+                title = "Types de contenus",
+                subtitle = "Filtrage facultatif : seuls les types cochés apparaissent dans la recherche.",
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        MediaType.entries.forEach { type ->
+                            FilterChip(
+                                selected = type.id in state.settings.enabledTypes,
+                                onClick = { vm.toggleType(type) },
+                                label = { Text(type.label) },
+                            )
+                        }
+                    }
+                    Text(
+                        if (state.settings.enabledTypes.isEmpty()) {
+                            "Aucun filtre : tous les types sont affichés."
+                        } else {
+                            "Filtre actif : ${state.settings.enabledTypes.size} type(s) affiché(s)."
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    if (state.settings.enabledTypes.isNotEmpty()) {
+                        TextButton(onClick = { vm.clearTypeFilter() }) {
+                            Text("Désactiver le filtre")
+                        }
+                    }
+                }
+            }
+        }
+
+        item {
+            SectionCard(
+                modifier = Modifier.padding(horizontal = 16.dp),
                 title = "Freebox",
                 subtitle = "API officielle Freebox OS, dossier de destination et session.",
             ) {
@@ -332,7 +374,7 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
                             modifier = Modifier.size(16.dp),
                         )
                         Spacer(Modifier.size(8.dp))
-                        Text("S3ARCH 1.1.0 · Material 3 Expressive", style = MaterialTheme.typography.bodyMedium)
+                        Text("S3ARCH 1.2.0 · Material 3 Expressive", style = MaterialTheme.typography.bodyMedium)
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(

@@ -16,6 +16,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
+import okhttp3.FormBody
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -187,33 +188,44 @@ class FreeboxApi {
 
     // ------------------------------------------------------------------ telechargements
 
-    /** Cree (si besoin) le dossier de destination sur la Freebox. */
+    /**
+     * Cree (si besoin) le dossier de destination sur la Freebox.
+     * Les chemins de l'API Freebox doivent se terminer par un « / ».
+     */
     suspend fun ensureFolder(dir: String) = withContext(Dispatchers.IO) {
         ensureSession()
-        val parts = dir.trim().split('/').filter { it.isNotBlank() }
-        var parent = ""
-        for (part in parts) {
+        var parent = "/"
+        for (part in normalizeDir(dir).split('/').filter { it.isNotBlank() }) {
             runCatching {
                 val payload = buildJsonObject {
-                    put("parent", b64(if (parent.isEmpty()) "/" else parent))
+                    put("parent", b64(parent))
                     put("dirname", part)
                 }
                 authCall("/fs/mkdir/", "POST", payload)
             }
-            parent = if (parent.isEmpty()) "/$part" else "$parent/$part"
+            parent = "$parent$part/"
         }
         Unit
     }
 
-    /** Ajoute une URL (.torrent, magnet) dans le gestionnaire de la Freebox. */
+    /**
+     * Ajoute une URL (.torrent, magnet) dans le gestionnaire de la Freebox.
+     *
+     * ATTENTION : contrairement au reste de l'API, /downloads/add/ n'accepte PAS
+     * de corps JSON (la Freebox repond alors « invalid_request ») : les parametres
+     * doivent etre envoyes en application/x-www-form-urlencoded.
+     */
     suspend fun addDownload(url: String, dir: String): String = withContext(Dispatchers.IO) {
         ensureSession()
-        if (url.isBlank()) throw FreeboxException("Lien de telechargement absent pour ce torrent")
-        val payload = buildJsonObject {
-            put("download_url", url)
-            put("download_dir", b64(dir))
-        }
-        val element = authCall("/downloads/add/", "POST", payload)
+        val link = url.trim()
+        if (link.isBlank()) throw FreeboxException("Lien de telechargement absent pour ce torrent")
+        val element = authFormCall(
+            "/downloads/add/",
+            listOf(
+                "download_url" to link,
+                "download_dir" to b64(normalizeDir(dir)),
+            ),
+        )
         val id = element.findAddedTaskId()
         if (id != null) return@withContext id
 
@@ -273,13 +285,31 @@ class FreeboxApi {
         return try {
             rawCall(base + path, method, body, token)
         } catch (e: FreeboxAuthException) {
-            // Session expiree : on tente une reconnexion silencieuse avec l'app_token.
-            val host = base.substringAfter("//").substringBefore("/")
-            val apiBase = "/" + base.substringAfter("//").substringAfter("/")
-            val stored = appToken ?: throw e
-            connect(host, apiBase, stored)
+            renewSession()
             rawCall(base + path, method, body, sessionToken)
         }
+    }
+
+    /** Appel POST en application/x-www-form-urlencoded (requis par /downloads/add/). */
+    private suspend fun authFormCall(path: String, params: List<Pair<String, String>>): JsonElement {
+        val base = baseUrl ?: throw FreeboxException("Freebox non connectee")
+        val token = sessionToken ?: throw FreeboxException("Session Freebox absente")
+        return try {
+            rawFormCall(base + path, params, token)
+        } catch (e: FreeboxAuthException) {
+            renewSession()
+            rawFormCall(base + path, params, sessionToken)
+        }
+    }
+
+    /** Rouvre une session avec l'app_token conserve (session expiree). */
+    private suspend fun renewSession() {
+        val base = baseUrl ?: throw FreeboxException("Freebox non connectee")
+        val stored = appToken
+            ?: throw FreeboxException("Session Freebox expiree : reconnectez la Freebox dans les reglages")
+        val host = base.substringAfter("//").substringBefore("/")
+        val apiBase = "/" + base.substringAfter("//").substringAfter("/")
+        connect(host, apiBase, stored)
     }
 
     private fun rawCall(url: String, method: String, body: JsonElement?, auth: String?): JsonElement {
@@ -292,23 +322,37 @@ class FreeboxApi {
             "DELETE" -> builder.delete()
             else -> builder.method(method, (body?.toString() ?: "{}").toRequestBody(jsonMedia))
         }
-        val response = streamClient.newCall(builder.build()).execute()
-        return response.use {
-            val text = it.body?.string().orEmpty()
-            val root = runCatching { json.parseToJsonElement(text).jsonObject }.getOrNull()
-                ?: throw FreeboxException("Reponse Freebox illisible (HTTP ${it.code})")
-            val success = root["success"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: true
-            if (!success) {
-                val code = root["error_code"]?.jsonPrimitive?.contentOrNull
-                val msg = root["msg"]?.jsonPrimitive?.contentOrNull
-                    ?: root["error"]?.jsonPrimitive?.contentOrNull
-                    ?: "Erreur Freebox"
-                if (code == "auth_required" || code == "invalid_session") throw FreeboxAuthException(msg)
-                throw FreeboxException(SafeErrors.describe(code, msg))
-            }
-            if (!it.isSuccessful) throw FreeboxException("Erreur Freebox HTTP ${it.code}")
-            root["result"] ?: JsonObject(emptyMap())
+        return readResponse(streamClient.newCall(builder.build()).execute())
+    }
+
+    private fun rawFormCall(
+        url: String,
+        params: List<Pair<String, String>>,
+        auth: String?,
+    ): JsonElement {
+        val parsed = url.toHttpUrlOrNull() ?: throw FreeboxException("URL Freebox invalide : $url")
+        val form = FormBody.Builder()
+        params.forEach { (name, value) -> form.add(name, value) }
+        val builder = Request.Builder().url(parsed).post(form.build())
+        if (!auth.isNullOrBlank()) builder.header("X-Fbx-App-Auth", auth)
+        return readResponse(streamClient.newCall(builder.build()).execute())
+    }
+
+    private fun readResponse(response: Response): JsonElement = response.use {
+        val text = it.body?.string().orEmpty()
+        val root = runCatching { json.parseToJsonElement(text).jsonObject }.getOrNull()
+            ?: throw FreeboxException("Reponse Freebox illisible (HTTP ${it.code})")
+        val success = root["success"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: true
+        if (!success) {
+            val code = root["error_code"]?.jsonPrimitive?.contentOrNull
+            val msg = root["msg"]?.jsonPrimitive?.contentOrNull
+                ?: root["error"]?.jsonPrimitive?.contentOrNull
+                ?: "Erreur Freebox"
+            if (code == "auth_required" || code == "invalid_session") throw FreeboxAuthException(msg)
+            throw FreeboxException(SafeErrors.describe(code, msg))
         }
+        if (!it.isSuccessful) throw FreeboxException("Erreur Freebox HTTP ${it.code}")
+        root["result"] ?: JsonObject(emptyMap())
     }
 
     // ------------------------------------------------------------------ helpers
@@ -352,6 +396,19 @@ class FreeboxApi {
     private fun b64(value: String): String =
         Base64.encodeToString(value.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
 
+    /**
+     * Les chemins Freebox sont absolus et se terminent obligatoirement par un « / ».
+     * Un dossier sans slash final est refuse par /downloads/add/ (« invalid_request »).
+     */
+    private fun normalizeDir(dir: String): String {
+        var value = dir.trim().replace("\\", "/")
+        if (value.isEmpty()) value = DEFAULT_DIR
+        while (value.contains("//")) value = value.replace("//", "/")
+        if (!value.startsWith("/")) value = "/$value"
+        if (!value.endsWith("/")) value = "$value/"
+        return value
+    }
+
     private fun normalizeHost(rawHost: String): String {
         var host = rawHost.trim()
         host = host.removePrefix("http://").removePrefix("https://")
@@ -378,7 +435,8 @@ class FreeboxApi {
     companion object {
         const val APP_ID = "com.s3arch.app"
         const val APP_NAME = "S3ARCH"
-        const val APP_VERSION = "1.0.0"
+        const val APP_VERSION = "1.2.0"
+        const val DEFAULT_DIR = "/Disque dur/S3ARCH"
     }
 }
 
@@ -390,6 +448,14 @@ internal object SafeErrors {
         "auth_required", "invalid_session" -> "Session Freebox expiree"
         "insufficient_rights" -> "Droits insuffisants : autorisez S3ARCH sur la Freebox"
         "no_free_space" -> "Plus d'espace libre sur la Freebox"
+        "invalid_request" ->
+            "Parametres refuses par la Freebox : verifiez le dossier de destination et le lien du torrent"
+        "invalid_url" -> "Lien refuse par la Freebox : le tracker a peut-etre renvoye une page au lieu du .torrent"
+        "invalid_file" -> "Fichier .torrent invalide ou illisible par la Freebox"
+        "invalid_operation" -> "Operation invalide pour ce telechargement"
+        "too_many_tasks" -> "Trop de telechargements dans la file de la Freebox"
+        "exists" -> "Ce torrent est deja present dans la file Freebox"
+        "hibernating" -> "Le gestionnaire de telechargement de la Freebox est en veille"
         else -> if (code.isNullOrBlank()) message else "$message ($code)"
     }
 }
