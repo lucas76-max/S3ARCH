@@ -33,6 +33,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.s3arch.app.ui.components.LogoMark
+import com.s3arch.app.ui.theme.S3ARCHTheme
 import com.s3arch.app.ui.screens.DownloadsScreen
 import com.s3arch.app.ui.screens.SearchScreen
 import com.s3arch.app.ui.screens.SettingsScreen
@@ -51,15 +52,17 @@ fun AppRoot(vm: S3archViewModel) {
         }
     }
 
-    when {
-        !state.loaded -> SplashScreen()
-        !state.settings.onboardingDone -> SetupScreen(
-            state = state,
-            vm = vm,
-            snackbarHostState = snackbarHostState,
-            onFinish = { vm.finishOnboarding() },
-        )
-        else -> MainScaffold(state = state, vm = vm, snackbarHostState = snackbarHostState)
+    S3ARCHTheme(dynamicColor = state.settings.dynamicColor) {
+        when {
+            !state.loaded -> SplashScreen()
+            !state.settings.onboardingDone -> SetupScreen(
+                state = state,
+                vm = vm,
+                snackbarHostState = snackbarHostState,
+                onFinish = { vm.finishOnboarding() },
+            )
+            else -> MainScaffold(state = state, vm = vm, snackbarHostState = snackbarHostState)
+        }
     }
 }
 
@@ -79,6 +82,7 @@ private fun MainScaffold(
             NavigationBar(
                 containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
                 tonalElevation = 0.dp,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
             ) {
                 NavigationBarItem(
                     selected = tab == 0,

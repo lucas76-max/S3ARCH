@@ -3,6 +3,7 @@ package com.s3arch.app.ui.screens
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
@@ -24,10 +25,11 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.Router
-import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -37,28 +39,34 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.s3arch.app.data.Tracker
+import com.s3arch.app.data.TrackerSource
 import com.s3arch.app.ui.FreeboxStatus
 import com.s3arch.app.ui.S3archViewModel
 import com.s3arch.app.ui.UiState
+import com.s3arch.app.ui.components.AddTrackerDialog
 import com.s3arch.app.ui.components.LogoMark
 import com.s3arch.app.ui.components.SectionCard
 import com.s3arch.app.ui.components.TrackerKeyEditor
+import com.s3arch.app.ui.components.scaleOnPress
+import androidx.compose.foundation.interaction.MutableInteractionSource
 
 /**
- * Premier demarrage : saisie des cles API puis connexion a la Freebox
- * (autorisation officielle Freebox OS, avec appui sur la fleche du boitier).
+ * Premier demarrage : cles API puis connexion Freebox (autorisation officielle).
  */
 @Composable
 fun SetupScreen(
@@ -76,11 +84,18 @@ fun SetupScreen(
     var v3xUrl by rememberSaveable { mutableStateOf(state.settings.v3xUrl) }
     var host by rememberSaveable { mutableStateOf(state.settings.freeboxHost) }
     var folder by rememberSaveable { mutableStateOf(state.settings.freeboxDownloadDir) }
+    var showAddTracker by remember { mutableStateOf(false) }
 
-    val hasKey = listOf(c411Key, tr4kerKey, v3xKey).any { it.isNotBlank() }
+    val hasKey = listOf(c411Key, tr4kerKey, v3xKey).any { it.isNotBlank() } ||
+        state.settings.customTrackers.any { it.key.isNotBlank() }
     val connected = state.setup.status == FreeboxStatus.Connected
-    val busy = state.setup.status == FreeboxStatus.Connecting || state.setup.status == FreeboxStatus.WaitingApproval
-    val progress by animateFloatAsState(if (step == 0) 0.5f else 1f, label = "setup-progress")
+    val busy = state.setup.status == FreeboxStatus.Connecting ||
+        state.setup.status == FreeboxStatus.WaitingApproval
+    val progress by animateFloatAsState(
+        targetValue = if (step == 0) 0.5f else 1f,
+        animationSpec = spring(),
+        label = "setup-progress",
+    )
 
     fun persistKeys() {
         vm.saveApiKeys(
@@ -97,6 +112,16 @@ fun SetupScreen(
         )
     }
 
+    if (showAddTracker) {
+        AddTrackerDialog(
+            onDismiss = { showAddTracker = false },
+            onConfirm = { label, url, key ->
+                vm.addCustomTracker(label, url, key)
+                showAddTracker = false
+            },
+        )
+    }
+
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         containerColor = MaterialTheme.colorScheme.background,
@@ -107,38 +132,41 @@ fun SetupScreen(
                 .padding(padding)
                 .imePadding(),
         ) {
-            Column(modifier = Modifier.padding(horizontal = 24.dp, vertical = 26.dp)) {
+            Column(modifier = Modifier.padding(horizontal = 24.dp, vertical = 22.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    LogoMark(52)
-                    Spacer(Modifier.size(14.dp))
+                    LogoMark(56)
+                    Spacer(Modifier.size(16.dp))
                     Column {
-                        Text("S3ARCH", style = MaterialTheme.typography.headlineMedium)
+                        Text("S3ARCH", style = MaterialTheme.typography.displaySmall)
                         Text(
-                            "Recherche torrents · Freebox · VLC",
+                            "Recherche · Freebox · VLC",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 }
-                Spacer(Modifier.height(22.dp))
+                Spacer(Modifier.height(20.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    StepPill(index = 1, label = "Clés API", active = step == 0)
+                    StepPill(index = 2, label = "Freebox", active = step == 1)
+                }
+                Spacer(Modifier.height(12.dp))
                 LinearProgressIndicator(
                     progress = { progress },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(4.dp),
+                        .height(6.dp),
                     color = MaterialTheme.colorScheme.primary,
                     trackColor = MaterialTheme.colorScheme.surfaceVariant,
                 )
-                Spacer(Modifier.height(10.dp))
-                Text(
-                    if (step == 0) "Étape 1 sur 2 · Clés API" else "Étape 2 sur 2 · Freebox",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
             }
 
+            // weight(1f) : indispensable pour que la barre d'action reste visible.
             AnimatedContent(
                 targetState = step,
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
                 transitionSpec = { fadeIn() togetherWith fadeOut() },
                 label = "setup-step",
             ) { currentStep ->
@@ -161,7 +189,17 @@ fun SetupScreen(
                                     urlValue = c411Url,
                                     onKeyChange = { c411Key = it },
                                     onUrlChange = { c411Url = it },
-                                    onTest = { vm.testTracker(Tracker.C411, c411Key, c411Url) },
+                                    onTest = {
+                                        vm.testTracker(
+                                            TrackerSource(
+                                                Tracker.C411.id,
+                                                Tracker.C411.label,
+                                                c411Url,
+                                                c411Key,
+                                                Tracker.C411,
+                                            ),
+                                        )
+                                    },
                                     testEnabled = !state.searching,
                                 )
                                 TrackerKeyEditor(
@@ -170,7 +208,17 @@ fun SetupScreen(
                                     urlValue = tr4kerUrl,
                                     onKeyChange = { tr4kerKey = it },
                                     onUrlChange = { tr4kerUrl = it },
-                                    onTest = { vm.testTracker(Tracker.TR4KER, tr4kerKey, tr4kerUrl) },
+                                    onTest = {
+                                        vm.testTracker(
+                                            TrackerSource(
+                                                Tracker.TR4KER.id,
+                                                Tracker.TR4KER.label,
+                                                tr4kerUrl,
+                                                tr4kerKey,
+                                                Tracker.TR4KER,
+                                            ),
+                                        )
+                                    },
                                     testEnabled = !state.searching,
                                 )
                                 TrackerKeyEditor(
@@ -179,11 +227,52 @@ fun SetupScreen(
                                     urlValue = v3xUrl,
                                     onKeyChange = { v3xKey = it },
                                     onUrlChange = { v3xUrl = it },
-                                    onTest = { vm.testTracker(Tracker.V3X, v3xKey, v3xUrl) },
+                                    onTest = {
+                                        vm.testTracker(
+                                            TrackerSource(
+                                                Tracker.V3X.id,
+                                                Tracker.V3X.label,
+                                                v3xUrl,
+                                                v3xKey,
+                                                Tracker.V3X,
+                                            ),
+                                        )
+                                    },
                                     testEnabled = !state.searching,
                                 )
+
+                                if (state.settings.customTrackers.isNotEmpty()) {
+                                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        state.settings.customTrackers.forEach { custom ->
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Icon(
+                                                    Icons.Rounded.Add,
+                                                    contentDescription = null,
+                                                    tint = MaterialTheme.colorScheme.primary,
+                                                    modifier = Modifier.size(16.dp),
+                                                )
+                                                Spacer(Modifier.size(8.dp))
+                                                Text(
+                                                    "${custom.label} · ${custom.url}",
+                                                    style = MaterialTheme.typography.labelMedium,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
+
+                        // Ajout d'un tracker tiers : texte discret.
+                        TextButton(onClick = { showAddTracker = true }) {
+                            Text(
+                                "Ajouter un tracker Torznab tiers",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                            )
+                        }
+
                         Text(
                             "Une seule clé suffit pour démarrer. Vous pourrez compléter plus tard dans les réglages.",
                             style = MaterialTheme.typography.bodySmall,
@@ -192,16 +281,16 @@ fun SetupScreen(
                     } else {
                         SectionCard(
                             title = "Connexion à la Freebox",
-                            subtitle = "S3ARCH utilise l'API officielle Freebox OS et crée un dossier dédié aux téléchargements.",
+                            subtitle = "API officielle Freebox OS. Un dossier S3ARCH sera créé pour vos téléchargements.",
                         ) {
-                            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                                 OutlinedTextField(
                                     value = host,
                                     onValueChange = { host = it },
                                     label = { Text("Adresse de la Freebox") },
                                     supportingText = { Text("mafreebox.freebox.fr par défaut") },
                                     singleLine = true,
-                                    shape = RoundedCornerShape(16.dp),
+                                    shape = RoundedCornerShape(20.dp),
                                     modifier = Modifier.fillMaxWidth(),
                                 )
                                 OutlinedTextField(
@@ -210,63 +299,53 @@ fun SetupScreen(
                                     label = { Text("Dossier de téléchargement") },
                                     supportingText = { Text("/Disque dur/S3ARCH") },
                                     singleLine = true,
-                                    shape = RoundedCornerShape(16.dp),
+                                    shape = RoundedCornerShape(20.dp),
                                     modifier = Modifier.fillMaxWidth(),
                                 )
                                 AnimatedVisibility(visible = state.setup.status != FreeboxStatus.Idle) {
                                     FreeboxStatusBlock(state)
                                 }
-                                Button(
-                                    onClick = { vm.connectFreebox(host, folder) },
+                                ConnectButton(
+                                    label = when {
+                                        connected -> "Autoriser à nouveau"
+                                        busy -> "Connexion en cours…"
+                                        else -> "Connecter la Freebox"
+                                    },
                                     enabled = !busy && host.isNotBlank(),
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(52.dp),
-                                    shape = RoundedCornerShape(16.dp),
-                                ) {
-                                    if (busy) {
-                                        CircularProgressIndicator(
-                                            modifier = Modifier.size(18.dp),
-                                            strokeWidth = 2.dp,
-                                            color = MaterialTheme.colorScheme.onPrimary,
-                                        )
-                                        Spacer(Modifier.size(10.dp))
-                                    }
-                                    Text(
-                                        when {
-                                            connected -> "Autoriser à nouveau"
-                                            busy -> "Connexion en cours…"
-                                            else -> "Connecter la Freebox"
-                                        },
-                                    )
-                                }
+                                    busy = busy,
+                                    onClick = { vm.connectFreebox(host, folder) },
+                                )
                             }
                         }
                         Text(
                             "Une fois la demande envoyée, validez sur la Freebox en appuyant sur la flèche → " +
-                                "(menu de l'écran) dans les deux minutes.",
+                                "dans les deux minutes.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    Spacer(Modifier.height(96.dp))
+                    Spacer(Modifier.height(12.dp))
                 }
             }
 
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .navigationBarsPadding()
-                    .background(MaterialTheme.colorScheme.background)
-                    .padding(horizontal = 20.dp, vertical = 14.dp),
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                shape = RoundedCornerShape(topStart = 30.dp, topEnd = 30.dp),
             ) {
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .navigationBarsPadding()
+                        .padding(horizontal = 20.dp, vertical = 14.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     if (step == 1) {
-                        TextButton(onClick = { step = 0 }) { Text("Retour") }
+                        TextButton(onClick = { step = 0 }) {
+                            Icon(Icons.Rounded.ArrowBack, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.size(6.dp))
+                            Text("Retour")
+                        }
                     }
                     Spacer(Modifier.weight(1f))
                     if (step == 0) {
@@ -276,12 +355,10 @@ fun SetupScreen(
                                 step = 1
                             },
                             enabled = hasKey,
-                            modifier = Modifier.height(50.dp),
-                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier.height(56.dp),
+                            shape = RoundedCornerShape(50),
                         ) {
-                            Icon(Icons.Rounded.Search, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.size(8.dp))
-                            Text("Continuer")
+                            Text("Continuer", style = MaterialTheme.typography.labelLarge)
                         }
                     } else {
                         TextButton(
@@ -297,17 +374,76 @@ fun SetupScreen(
                                 onFinish()
                             },
                             enabled = connected,
-                            modifier = Modifier.height(50.dp),
-                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier.height(56.dp),
+                            shape = RoundedCornerShape(50),
                         ) {
                             Icon(Icons.Rounded.CheckCircle, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.size(8.dp))
-                            Text("Terminer")
+                            Text("Terminer", style = MaterialTheme.typography.labelLarge)
                         }
                     }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun ConnectButton(
+    label: String,
+    enabled: Boolean,
+    busy: Boolean,
+    onClick: () -> Unit,
+) {
+    val interaction = remember { MutableInteractionSource() }
+    Button(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(56.dp)
+            .scaleOnPress(interaction),
+        shape = RoundedCornerShape(50),
+        interactionSource = interaction,
+    ) {
+        if (busy) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(18.dp),
+                strokeWidth = 2.dp,
+                color = MaterialTheme.colorScheme.onPrimary,
+            )
+            Spacer(Modifier.size(10.dp))
+        }
+        Text(label, style = MaterialTheme.typography.labelLarge)
+    }
+}
+
+@Composable
+private fun StepPill(index: Int, label: String, active: Boolean) {
+    val container = if (active) {
+        MaterialTheme.colorScheme.primary
+    } else {
+        MaterialTheme.colorScheme.surfaceContainerHigh
+    }
+    val content = if (active) {
+        MaterialTheme.colorScheme.onPrimary
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    Row(
+        modifier = Modifier
+            .background(container, RoundedCornerShape(50))
+            .padding(horizontal = 14.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            "$index",
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.Bold,
+            color = content.copy(alpha = 0.7f),
+        )
+        Text(label, style = MaterialTheme.typography.labelMedium, color = content)
     }
 }
 
@@ -322,8 +458,8 @@ private fun FreeboxStatusBlock(state: UiState) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(color.copy(alpha = 0.10f), RoundedCornerShape(16.dp))
-            .padding(14.dp),
+            .background(color.copy(alpha = 0.12f), RoundedCornerShape(20.dp))
+            .padding(16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         when (setup.status) {

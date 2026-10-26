@@ -9,90 +9,82 @@ import org.xmlpull.v1.XmlPullParserFactory
 import java.io.StringReader
 
 /**
- * Recherche generique au format Torznab (utilise par C411, TR4KER et V3X).
+ * Recherche generique au format Torznab (C411, TR4KER, V3X et trackers tiers).
  *
  * URL construite : <base>?t=search&apikey=<cle>&q=<terme>&limit=100&extended=1
  */
 class TorznabClient {
 
-    suspend fun search(
-        tracker: Tracker,
-        baseUrl: String,
-        apiKey: String,
-        query: String,
-    ): List<TorrentResult> = withContext(Dispatchers.IO) {
-        if (apiKey.isBlank()) throw TrackerException("Cle API ${tracker.label} manquante")
+    suspend fun search(source: TrackerSource, query: String): List<TorrentResult> =
+        withContext(Dispatchers.IO) {
+            if (source.apiKey.isBlank()) throw TrackerException("Cle API ${source.label} manquante")
 
-        val base = baseUrl.trim().ifBlank { tracker.defaultUrl }
-        val httpUrl = base.toHttpUrlOrNull()
-            ?: throw TrackerException("URL ${tracker.label} invalide : $base")
+            val httpUrl = source.url.trim().toHttpUrlOrNull()
+                ?: throw TrackerException("URL ${source.label} invalide : ${source.url}")
 
+            val builder = httpUrl.newBuilder()
+            if (httpUrl.queryParameter("t") == null) builder.addQueryParameter("t", "search")
+            if (httpUrl.queryParameter("apikey") == null) builder.addQueryParameter("apikey", source.apiKey.trim())
+            if (query.isNotBlank() && httpUrl.queryParameter("q") == null) {
+                builder.addQueryParameter("q", query.trim())
+            }
+            if (httpUrl.queryParameter("extended") == null) builder.addQueryParameter("extended", "1")
+            if (httpUrl.queryParameter("limit") == null) builder.addQueryParameter("limit", "100")
+
+            val request = Request.Builder()
+                .url(builder.build())
+                .header("Accept", "application/rss+xml, application/xml, text/xml, */*")
+                .get()
+                .build()
+
+            val response = Network.http.newCall(request).execute()
+            response.use { resp ->
+                val body = resp.body?.string().orEmpty()
+                if (!resp.isSuccessful) {
+                    throw TrackerException(
+                        when (resp.code) {
+                            401, 403 -> "${source.label} : cle API refusee (${resp.code})"
+                            404 -> "${source.label} : endpoint introuvable (verifiez l'URL Torznab)"
+                            else -> "${source.label} : erreur HTTP ${resp.code}"
+                        },
+                    )
+                }
+                if (body.isBlank()) return@use emptyList()
+                if (!body.trimStart().startsWith("<")) {
+                    throw TrackerException("${source.label} : reponse inattendue (URL Torznab incorrecte ?)")
+                }
+                parseItems(body, source)
+            }
+        }
+
+    /** Verifie la cle API et l'URL Torznab avec une vraie recherche de test. */
+    suspend fun testConnection(source: TrackerSource): String = withContext(Dispatchers.IO) {
+        if (source.apiKey.isBlank()) throw TrackerException("${source.label} : cle API vide")
+        val httpUrl = source.url.trim().toHttpUrlOrNull()
+            ?: throw TrackerException("${source.label} : URL invalide")
         val builder = httpUrl.newBuilder()
         if (httpUrl.queryParameter("t") == null) builder.addQueryParameter("t", "search")
-        if (httpUrl.queryParameter("apikey") == null) builder.addQueryParameter("apikey", apiKey.trim())
-        if (query.isNotBlank() && httpUrl.queryParameter("q") == null) {
-            builder.addQueryParameter("q", query.trim())
-        }
-        if (httpUrl.queryParameter("extended") == null) builder.addQueryParameter("extended", "1")
-        if (httpUrl.queryParameter("limit") == null) builder.addQueryParameter("limit", "100")
-
-        val request = Request.Builder()
-            .url(builder.build())
-            .header("Accept", "application/rss+xml, application/xml, text/xml, */*")
-            .get()
-            .build()
-
+        if (httpUrl.queryParameter("apikey") == null) builder.addQueryParameter("apikey", source.apiKey.trim())
+        if (httpUrl.queryParameter("q") == null) builder.addQueryParameter("q", "test")
+        if (httpUrl.queryParameter("limit") == null) builder.addQueryParameter("limit", "5")
+        val request = Request.Builder().url(builder.build()).get().build()
         val response = Network.http.newCall(request).execute()
-        response.use { resp ->
-            val body = resp.body?.string().orEmpty()
-            if (!resp.isSuccessful) {
-                throw TrackerException(
-                    when (resp.code) {
-                        401, 403 -> "${tracker.label} : cle API refusee (${resp.code})"
-                        404 -> "${tracker.label} : endpoint introuvable (verifiez l'URL Torznab)"
-                        else -> "${tracker.label} : erreur HTTP ${resp.code}"
-                    },
-                )
+        response.use {
+            if (it.code == 401 || it.code == 403) {
+                throw TrackerException("${source.label} : cle API refusee")
             }
-            if (body.isBlank()) return@use emptyList()
-            val trimmed = body.trimStart()
-            if (!trimmed.startsWith("<")) {
-                throw TrackerException("${tracker.label} : reponse inattendue (URL Torznab incorrecte ?)")
+            if (!it.isSuccessful) throw TrackerException("${source.label} : HTTP ${it.code}")
+            val body = it.body?.string().orEmpty()
+            if (body.contains("<error")) {
+                val detail = Regex("description=\"([^\"]+)\"").find(body)?.groupValues?.getOrNull(1)
+                throw TrackerException("${source.label} : ${detail ?: "cle API refusee"}")
             }
-            parseItems(body, tracker)
+            val count = Regex("<item>").findAll(body).count()
+            "${source.label} : connexion OK ($count resultats de test)"
         }
     }
 
-    /** Verifie la cle API et l'URL Torznab avec une vraie recherche de test. */
-    suspend fun testConnection(tracker: Tracker, baseUrl: String, apiKey: String): String =
-        withContext(Dispatchers.IO) {
-            if (apiKey.isBlank()) throw TrackerException("${tracker.label} : cle API vide")
-            val base = baseUrl.trim().ifBlank { tracker.defaultUrl }
-            val httpUrl = base.toHttpUrlOrNull()
-                ?: throw TrackerException("${tracker.label} : URL invalide")
-            val builder = httpUrl.newBuilder()
-            if (httpUrl.queryParameter("t") == null) builder.addQueryParameter("t", "search")
-            if (httpUrl.queryParameter("apikey") == null) builder.addQueryParameter("apikey", apiKey.trim())
-            if (httpUrl.queryParameter("q") == null) builder.addQueryParameter("q", "test")
-            if (httpUrl.queryParameter("limit") == null) builder.addQueryParameter("limit", "5")
-            val request = Request.Builder().url(builder.build()).get().build()
-            val response = Network.http.newCall(request).execute()
-            response.use {
-                if (it.code == 401 || it.code == 403) {
-                    throw TrackerException("${tracker.label} : cle API refusee")
-                }
-                if (!it.isSuccessful) throw TrackerException("${tracker.label} : HTTP ${it.code}")
-                val body = it.body?.string().orEmpty()
-                if (body.contains("<error")) {
-                    val detail = Regex("description=\\\"([^\\\"]+)\\\"").find(body)?.groupValues?.getOrNull(1)
-                    throw TrackerException("${tracker.label} : ${detail ?: "cle API refusee"}")
-                }
-                val count = Regex("<item>").findAll(body).count()
-                "${tracker.label} : connexion OK ($count resultats de test)"
-            }
-        }
-
-    private fun parseItems(xml: String, tracker: Tracker): List<TorrentResult> {
+    private fun parseItems(xml: String, source: TrackerSource): List<TorrentResult> {
         val results = mutableListOf<TorrentResult>()
         try {
             val parser = XmlPullParserFactory.newInstance().newPullParser()
@@ -145,7 +137,7 @@ class TorznabClient {
                             val v = values
                             val a = attrs
                             if (v != null) {
-                                buildResult(v, a.orEmpty(), enclosure, tracker)?.let { results.add(it) }
+                                buildResult(v, a.orEmpty(), enclosure, source)?.let { results.add(it) }
                             }
                             values = null
                             attrs = null
@@ -158,7 +150,7 @@ class TorznabClient {
             }
         } catch (e: Exception) {
             if (results.isEmpty()) {
-                throw TrackerException("${tracker.label} : flux Torznab illisible (${e.message ?: "XML invalide"})")
+                throw TrackerException("${source.label} : flux Torznab illisible (${e.message ?: "XML invalide"})")
             }
         }
         return results
@@ -168,7 +160,7 @@ class TorznabClient {
         values: Map<String, String>,
         attrs: Map<String, String>,
         enclosure: String?,
-        tracker: Tracker,
+        source: TrackerSource,
     ): TorrentResult? {
         val title = values["title"]?.trim().orEmpty()
         if (title.isBlank()) return null
@@ -201,7 +193,8 @@ class TorznabClient {
             sizeBytes = size,
             seeders = seeders,
             leechers = leechers,
-            tracker = tracker,
+            trackerId = source.id,
+            trackerLabel = source.label,
             downloadUrl = downloadUrl,
             magnet = magnet,
             category = values["category"]?.trim()?.takeIf { it.isNotBlank() },

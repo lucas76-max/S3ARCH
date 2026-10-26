@@ -15,6 +15,12 @@ fun formatBytes(bytes: Long): String {
     return String.format(Locale.FRENCH, "$pattern %s", value, units[index])
 }
 
+fun formatMbps(bytesPerSecond: Long): String {
+    if (bytesPerSecond <= 0) return "—"
+    val mbps = bytesPerSecond * 8.0 / 1_000_000.0
+    return String.format(Locale.FRENCH, if (mbps >= 100) "%.0f Mbps" else "%.1f Mbps", mbps)
+}
+
 fun formatSpeed(bytesPerSecond: Long): String {
     if (bytesPerSecond <= 0) return "—"
     return "${formatBytes(bytesPerSecond)}/s"

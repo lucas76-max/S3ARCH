@@ -2,7 +2,7 @@ package com.s3arch.app.data
 
 import kotlinx.serialization.Serializable
 
-/** Les trois trackers pris en charge. L'URL de base est modifiable dans les reglages. */
+/** Les trois trackers integres. L'URL de base est modifiable dans les reglages. */
 enum class Tracker(
     val id: String,
     val label: String,
@@ -37,6 +37,30 @@ enum class Tracker(
     }
 }
 
+/** Tracker Torznab ajoute par l'utilisateur (compatibilite non garantie). */
+@Serializable
+data class CustomTracker(
+    val id: String,
+    val label: String,
+    val url: String,
+    val key: String,
+)
+
+/**
+ * Une source interrogeable : soit un tracker integre, soit un endpoint Torznab tiers.
+ * C'est cette abstraction qui est utilisee par la recherche et les puces de filtre.
+ */
+data class TrackerSource(
+    val id: String,
+    val label: String,
+    val url: String,
+    val apiKey: String,
+    val builtin: Tracker? = null,
+) {
+    val isCustom: Boolean get() = builtin == null
+    val isConfigured: Boolean get() = apiKey.isNotBlank()
+}
+
 /** Un resultat de recherche, normalise quel que soit le tracker. */
 data class TorrentResult(
     val id: String,
@@ -44,7 +68,8 @@ data class TorrentResult(
     val sizeBytes: Long,
     val seeders: Int,
     val leechers: Int,
-    val tracker: Tracker,
+    val trackerId: String,
+    val trackerLabel: String,
     val downloadUrl: String,
     val magnet: String? = null,
     val category: String? = null,
@@ -98,6 +123,7 @@ data class TrackedDownload(
     val folder: String,
     val addedAt: Long,
     val sizeBytes: Long = 0L,
+    val seeders: Int = 0,
 )
 
 /** Reglages persistants de l'application. */
@@ -109,12 +135,14 @@ data class AppSettings(
     val v3xKey: String = "",
     val v3xUrl: String = Tracker.V3X.defaultUrl,
     val enabledTrackers: Set<String> = Tracker.entries.map { it.id }.toSet(),
+    val customTrackers: List<CustomTracker> = emptyList(),
     val freeboxHost: String = "mafreebox.freebox.fr",
     val freeboxApiBase: String = "/api/v8",
     val freeboxApiVersion: String = "8",
     val freeboxAppToken: String = "",
     val freeboxDownloadDir: String = "/Disque dur/S3ARCH",
     val onboardingDone: Boolean = false,
+    val dynamicColor: Boolean = true,
 ) {
     fun keyFor(tracker: Tracker): String = when (tracker) {
         Tracker.C411 -> c411Key
@@ -127,6 +155,35 @@ data class AppSettings(
         Tracker.TR4KER -> tr4kerUrl
         Tracker.V3X -> v3xUrl
     }
+
+    /** Toutes les sources disponibles (integrees + tiers). */
+    fun sources(): List<TrackerSource> = buildList {
+        Tracker.entries.forEach { tracker ->
+            add(
+                TrackerSource(
+                    id = tracker.id,
+                    label = tracker.label,
+                    url = urlFor(tracker),
+                    apiKey = keyFor(tracker),
+                    builtin = tracker,
+                ),
+            )
+        }
+        customTrackers.forEach { custom ->
+            add(
+                TrackerSource(
+                    id = custom.id,
+                    label = custom.label,
+                    url = custom.url,
+                    apiKey = custom.key,
+                ),
+            )
+        }
+    }
+
+    /** Sources effectivement interrogeables : activees et avec une cle. */
+    fun enabledSources(): List<TrackerSource> =
+        sources().filter { it.id in enabledTrackers && it.isConfigured }
 
     fun isConfigured(tracker: Tracker): Boolean = keyFor(tracker).isNotBlank()
 

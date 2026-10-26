@@ -1,7 +1,10 @@
 package com.s3arch.app.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -21,17 +24,18 @@ import androidx.compose.material.icons.rounded.DownloadDone
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.Timer
+import androidx.compose.material.icons.rounded.Upload
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -45,9 +49,10 @@ import com.s3arch.app.ui.UiState
 import com.s3arch.app.ui.components.EmptyState
 import com.s3arch.app.ui.components.Pill
 import com.s3arch.app.ui.components.ScreenHeader
+import com.s3arch.app.ui.components.scaleOnPress
 import com.s3arch.app.util.formatBytes
 import com.s3arch.app.util.formatEta
-import com.s3arch.app.util.formatSpeed
+import com.s3arch.app.util.formatMbps
 import com.s3arch.app.util.statusLabel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -65,7 +70,7 @@ fun DownloadsScreen(state: UiState, vm: S3archViewModel) {
     }
 
     val active = state.tasks.values.count { !it.isDone && !it.isError }
-    val totalSpeed = state.tasks.values.sumOf { it.rxRate }
+    val totalRate = state.tasks.values.sumOf { it.rxRate }
     val finished = state.tracked.count { state.tasks[it.taskId]?.isDone == true }
 
     Column(
@@ -74,12 +79,13 @@ fun DownloadsScreen(state: UiState, vm: S3archViewModel) {
             .background(MaterialTheme.colorScheme.background),
     ) {
         ScreenHeader(
-            title = "Téléchargements",
+            title = "Transferts",
             subtitle = when {
                 state.tracked.isEmpty() -> "Aucun transfert sur la Freebox"
-                totalSpeed > 0 -> "$active en cours · ${formatSpeed(totalSpeed)}"
+                totalRate > 0 -> "$active en cours · ${formatMbps(totalRate)}"
                 else -> "$finished terminé${if (finished > 1) "s" else ""} · ${state.tracked.size} au total"
             },
+            eyebrow = "Freebox OS",
             icon = Icons.Rounded.CloudDownload,
         )
 
@@ -90,9 +96,9 @@ fun DownloadsScreen(state: UiState, vm: S3archViewModel) {
                     .padding(horizontal = 16.dp, vertical = 10.dp)
                     .background(
                         MaterialTheme.colorScheme.error.copy(alpha = 0.12f),
-                        RoundedCornerShape(14.dp),
+                        RoundedCornerShape(18.dp),
                     )
-                    .padding(12.dp),
+                    .padding(14.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
@@ -113,7 +119,7 @@ fun DownloadsScreen(state: UiState, vm: S3archViewModel) {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
                 items(items = state.tracked, key = { it.taskId }) { download ->
                     DownloadCard(
@@ -140,14 +146,20 @@ private fun DownloadCard(
     val progress = task?.progress ?: 0f
     val done = task?.isDone == true
     val error = task?.isError == true
+    val interaction = remember { MutableInteractionSource() }
 
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(22.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(
+                1.dp,
+                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f),
+                RoundedCornerShape(30.dp),
+            ),
+        shape = RoundedCornerShape(30.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(modifier = Modifier.padding(18.dp)) {
             Row(verticalAlignment = Alignment.Top) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
@@ -156,7 +168,7 @@ private fun DownloadCard(
                         maxLines = 3,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    Spacer(Modifier.height(8.dp))
+                    Spacer(Modifier.height(10.dp))
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -175,12 +187,11 @@ private fun DownloadCard(
                                 else -> MaterialTheme.colorScheme.tertiary
                             },
                         )
-                        if (task != null && task.totalBytes > 0) {
-                            Pill(
-                                text = formatBytes(task.totalBytes),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
+                        Pill(
+                            text = if (download.seeders > 0) "${download.seeders} seeders" else "seeders —",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            icon = Icons.Rounded.Upload,
+                        )
                     }
                 }
                 IconButton(onClick = onRemove, modifier = Modifier.size(32.dp)) {
@@ -193,13 +204,13 @@ private fun DownloadCard(
                 }
             }
 
-            Spacer(Modifier.height(14.dp))
+            Spacer(Modifier.height(16.dp))
 
             if (task == null) {
                 LinearProgressIndicator(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(6.dp),
+                        .height(8.dp),
                     color = MaterialTheme.colorScheme.primary,
                 )
             } else {
@@ -207,16 +218,16 @@ private fun DownloadCard(
                     progress = { progress },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(6.dp),
+                        .height(8.dp),
                     color = if (error) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
                     trackColor = MaterialTheme.colorScheme.surfaceVariant,
                 )
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(10.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         "${(progress * 100).toInt()} %",
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.SemiBold,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.primary,
                     )
                     Spacer(Modifier.weight(1f))
@@ -228,28 +239,28 @@ private fun DownloadCard(
                 }
 
                 if (!done && !error) {
-                    Spacer(Modifier.height(6.dp))
+                    Spacer(Modifier.height(8.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
                             Icons.Rounded.Speed,
                             contentDescription = null,
-                            modifier = Modifier.size(14.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(15.dp),
+                            tint = MaterialTheme.colorScheme.primary,
                         )
-                        Spacer(Modifier.size(4.dp))
+                        Spacer(Modifier.size(5.dp))
                         Text(
-                            formatSpeed(task.rxRate),
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            formatMbps(task.rxRate),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.primary,
                         )
-                        Spacer(Modifier.size(12.dp))
+                        Spacer(Modifier.size(14.dp))
                         Icon(
                             Icons.Rounded.Timer,
                             contentDescription = null,
-                            modifier = Modifier.size(14.dp),
+                            modifier = Modifier.size(15.dp),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
-                        Spacer(Modifier.size(4.dp))
+                        Spacer(Modifier.size(5.dp))
                         Text(
                             formatEta(task.totalBytes - task.rxBytes, task.rxRate),
                             style = MaterialTheme.typography.labelMedium,
@@ -259,7 +270,7 @@ private fun DownloadCard(
                 }
 
                 if (task.error != null) {
-                    Spacer(Modifier.height(6.dp))
+                    Spacer(Modifier.height(8.dp))
                     Text(
                         task.error,
                         style = MaterialTheme.typography.labelMedium,
@@ -269,14 +280,16 @@ private fun DownloadCard(
             }
 
             if (done) {
-                Spacer(Modifier.height(14.dp))
+                Spacer(Modifier.height(16.dp))
                 Button(
                     onClick = onPlay,
                     enabled = !playing,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(46.dp),
-                    shape = RoundedCornerShape(14.dp),
+                        .height(50.dp)
+                        .scaleOnPress(interaction),
+                    shape = RoundedCornerShape(50),
+                    interactionSource = interaction,
                 ) {
                     if (playing) {
                         CircularProgressIndicator(
@@ -288,7 +301,7 @@ private fun DownloadCard(
                         Icon(Icons.Rounded.PlayArrow, contentDescription = null, modifier = Modifier.size(20.dp))
                     }
                     Spacer(Modifier.size(8.dp))
-                    Text("Lire avec VLC")
+                    Text("Lire avec VLC", style = MaterialTheme.typography.labelLarge)
                 }
             }
         }

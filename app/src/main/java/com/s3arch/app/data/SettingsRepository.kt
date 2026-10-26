@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
+import java.util.UUID
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "s3arch")
 
@@ -29,12 +30,14 @@ class SettingsRepository(private val context: Context) {
             v3xKey = prefs[KEY_V3X] ?: "",
             v3xUrl = prefs[URL_V3X] ?: Tracker.V3X.defaultUrl,
             enabledTrackers = prefs[ENABLED] ?: Tracker.entries.map { it.id }.toSet(),
+            customTrackers = decodeCustom(prefs[CUSTOM]),
             freeboxHost = prefs[FB_HOST] ?: "mafreebox.freebox.fr",
             freeboxApiBase = prefs[FB_BASE] ?: "/api/v8",
             freeboxApiVersion = prefs[FB_VERSION] ?: "8",
             freeboxAppToken = prefs[FB_TOKEN] ?: "",
             freeboxDownloadDir = prefs[FB_DIR] ?: "/Disque dur/S3ARCH",
             onboardingDone = prefs[ONBOARDING] ?: false,
+            dynamicColor = prefs[DYNAMIC_COLOR] ?: true,
         )
     }
 
@@ -53,6 +56,28 @@ class SettingsRepository(private val context: Context) {
         context.dataStore.edit { it[ENABLED] = ids }
     }
 
+    suspend fun addCustomTracker(label: String, url: String, key: String) {
+        context.dataStore.edit { prefs ->
+            val current = decodeCustom(prefs[CUSTOM])
+            val tracker = CustomTracker(
+                id = "custom-" + UUID.randomUUID().toString().take(8),
+                label = label.trim(),
+                url = url.trim(),
+                key = key.trim(),
+            )
+            prefs[CUSTOM] = encodeCustom(current + tracker)
+            prefs[ENABLED] = (prefs[ENABLED] ?: Tracker.entries.map { it.id }.toSet()) + tracker.id
+        }
+    }
+
+    suspend fun removeCustomTracker(id: String) {
+        context.dataStore.edit { prefs ->
+            val current = decodeCustom(prefs[CUSTOM])
+            prefs[CUSTOM] = encodeCustom(current.filterNot { it.id == id })
+            prefs[ENABLED] = (prefs[ENABLED] ?: emptySet()) - id
+        }
+    }
+
     suspend fun saveFreebox(host: String, apiBase: String, apiVersion: String, appToken: String, downloadDir: String) {
         context.dataStore.edit { prefs ->
             prefs[FB_HOST] = host.trim()
@@ -65,6 +90,10 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setDownloadDir(dir: String) {
         context.dataStore.edit { it[FB_DIR] = dir.trim() }
+    }
+
+    suspend fun setDynamicColor(enabled: Boolean) {
+        context.dataStore.edit { it[DYNAMIC_COLOR] = enabled }
     }
 
     suspend fun completeOnboarding() {
@@ -102,6 +131,16 @@ class SettingsRepository(private val context: Context) {
         }
     }
 
+    private fun decodeCustom(raw: String?): List<CustomTracker> {
+        if (raw.isNullOrBlank()) return emptyList()
+        return runCatching {
+            json.decodeFromString(ListSerializer(CustomTracker.serializer()), raw)
+        }.getOrDefault(emptyList())
+    }
+
+    private fun encodeCustom(trackers: List<CustomTracker>): String =
+        json.encodeToString(ListSerializer(CustomTracker.serializer()), trackers)
+
     private companion object {
         val KEY_C411 = stringPreferencesKey("c411_key")
         val KEY_TR4KER = stringPreferencesKey("tr4ker_key")
@@ -110,11 +149,13 @@ class SettingsRepository(private val context: Context) {
         val URL_TR4KER = stringPreferencesKey("tr4ker_url")
         val URL_V3X = stringPreferencesKey("v3x_url")
         val ENABLED = stringSetPreferencesKey("enabled_trackers")
+        val CUSTOM = stringPreferencesKey("custom_trackers")
         val FB_HOST = stringPreferencesKey("freebox_host")
         val FB_BASE = stringPreferencesKey("freebox_api_base")
         val FB_VERSION = stringPreferencesKey("freebox_version")
         val FB_TOKEN = stringPreferencesKey("freebox_app_token")
         val FB_DIR = stringPreferencesKey("freebox_download_dir")
         val ONBOARDING = booleanPreferencesKey("onboarding_done")
+        val DYNAMIC_COLOR = booleanPreferencesKey("dynamic_color")
     }
 }

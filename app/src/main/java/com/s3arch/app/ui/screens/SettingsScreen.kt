@@ -1,5 +1,6 @@
 package com.s3arch.app.ui.screens
 
+import android.os.Build
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -16,27 +17,34 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.ErrorOutline
+import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.s3arch.app.data.Tracker
+import com.s3arch.app.data.TrackerSource
 import com.s3arch.app.ui.FreeboxStatus
 import com.s3arch.app.ui.S3archViewModel
 import com.s3arch.app.ui.UiState
-import com.s3arch.app.ui.components.SectionCard
+import com.s3arch.app.ui.components.AddTrackerDialog
+import com.s3arch.app.ui.components.CustomTrackerRow
 import com.s3arch.app.ui.components.ScreenHeader
+import com.s3arch.app.ui.components.SectionCard
 import com.s3arch.app.ui.components.StatusDot
 import com.s3arch.app.ui.components.TrackerKeyEditor
 
@@ -50,27 +58,38 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
     var v3xUrl by rememberSaveable { mutableStateOf(state.settings.v3xUrl) }
     var host by rememberSaveable { mutableStateOf(state.settings.freeboxHost) }
     var folder by rememberSaveable { mutableStateOf(state.settings.freeboxDownloadDir) }
+    var showAddTracker by remember { mutableStateOf(false) }
+
+    if (showAddTracker) {
+        AddTrackerDialog(
+            onDismiss = { showAddTracker = false },
+            onConfirm = { label, url, key ->
+                vm.addCustomTracker(label, url, key)
+                showAddTracker = false
+            },
+        )
+    }
 
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background),
-        contentPadding = PaddingValues(bottom = 28.dp),
+        contentPadding = PaddingValues(bottom = 32.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         item {
             ScreenHeader(
                 title = "Réglages",
-                subtitle = "Clés API et connexion Freebox",
+                subtitle = "Clés API, trackers tiers et Freebox",
+                eyebrow = "S3ARCH",
                 icon = Icons.Rounded.Settings,
-                modifier = Modifier.padding(bottom = 4.dp),
             )
         }
 
         item {
             SectionCard(
                 modifier = Modifier.padding(horizontal = 16.dp),
-                title = "Clés API des trackers",
+                title = "Clés API",
                 subtitle = "Demandées au premier lancement, modifiables à tout moment.",
             ) {
                 Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -80,7 +99,17 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
                         urlValue = c411Url,
                         onKeyChange = { c411Key = it },
                         onUrlChange = { c411Url = it },
-                        onTest = { vm.testTracker(Tracker.C411, c411Key, c411Url) },
+                        onTest = {
+                            vm.testTracker(
+                                TrackerSource(
+                                    Tracker.C411.id,
+                                    Tracker.C411.label,
+                                    c411Url,
+                                    c411Key,
+                                    Tracker.C411,
+                                ),
+                            )
+                        },
                         testEnabled = !state.searching,
                     )
                     TrackerKeyEditor(
@@ -89,7 +118,17 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
                         urlValue = tr4kerUrl,
                         onKeyChange = { tr4kerKey = it },
                         onUrlChange = { tr4kerUrl = it },
-                        onTest = { vm.testTracker(Tracker.TR4KER, tr4kerKey, tr4kerUrl) },
+                        onTest = {
+                            vm.testTracker(
+                                TrackerSource(
+                                    Tracker.TR4KER.id,
+                                    Tracker.TR4KER.label,
+                                    tr4kerUrl,
+                                    tr4kerKey,
+                                    Tracker.TR4KER,
+                                ),
+                            )
+                        },
                         testEnabled = !state.searching,
                     )
                     TrackerKeyEditor(
@@ -98,7 +137,17 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
                         urlValue = v3xUrl,
                         onKeyChange = { v3xKey = it },
                         onUrlChange = { v3xUrl = it },
-                        onTest = { vm.testTracker(Tracker.V3X, v3xKey, v3xUrl) },
+                        onTest = {
+                            vm.testTracker(
+                                TrackerSource(
+                                    Tracker.V3X.id,
+                                    Tracker.V3X.label,
+                                    v3xUrl,
+                                    v3xKey,
+                                    Tracker.V3X,
+                                ),
+                            )
+                        },
                         testEnabled = !state.searching,
                     )
                     Button(
@@ -118,10 +167,47 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
                         },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(48.dp),
-                        shape = RoundedCornerShape(16.dp),
+                            .height(54.dp),
+                        shape = RoundedCornerShape(50),
                     ) {
-                        Text("Enregistrer les clés")
+                        Text("Enregistrer les clés", style = MaterialTheme.typography.labelLarge)
+                    }
+                }
+            }
+        }
+
+        item {
+            SectionCard(
+                modifier = Modifier.padding(horizontal = 16.dp),
+                title = "Trackers tiers",
+                subtitle = "Tout endpoint compatible Torznab. Compatibilité non garantie.",
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    if (state.settings.customTrackers.isEmpty()) {
+                        Text(
+                            "Aucun tracker tiers ajouté.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    } else {
+                        state.settings.customTrackers.forEach { custom ->
+                            CustomTrackerRow(
+                                tracker = custom,
+                                onTest = {
+                                    vm.testTracker(
+                                        TrackerSource(custom.id, custom.label, custom.url, custom.key),
+                                    )
+                                },
+                                onRemove = { vm.removeCustomTracker(custom.id) },
+                            )
+                        }
+                    }
+                    TextButton(onClick = { showAddTracker = true }) {
+                        Text(
+                            "Ajouter un tracker Torznab tiers",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                        )
                     }
                 }
             }
@@ -139,7 +225,7 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
                         onValueChange = { host = it },
                         label = { Text("Adresse de la Freebox") },
                         singleLine = true,
-                        shape = RoundedCornerShape(16.dp),
+                        shape = RoundedCornerShape(20.dp),
                         modifier = Modifier.fillMaxWidth(),
                     )
                     OutlinedTextField(
@@ -147,12 +233,11 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
                         onValueChange = { folder = it },
                         label = { Text("Dossier de téléchargement") },
                         singleLine = true,
-                        shape = RoundedCornerShape(16.dp),
+                        shape = RoundedCornerShape(20.dp),
                         modifier = Modifier.fillMaxWidth(),
                     )
 
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        val connected = state.setup.status == FreeboxStatus.Connected
                         val color = when (state.setup.status) {
                             FreeboxStatus.Connected -> MaterialTheme.colorScheme.primary
                             FreeboxStatus.Error -> MaterialTheme.colorScheme.error
@@ -179,7 +264,7 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
                         OutlinedButton(
                             onClick = { vm.reconnectFreebox() },
                             modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(14.dp),
+                            shape = RoundedCornerShape(50),
                         ) { Text("Session") }
                         Button(
                             onClick = {
@@ -187,7 +272,7 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
                                 vm.connectFreebox(host, folder)
                             },
                             modifier = Modifier.weight(1.4f),
-                            shape = RoundedCornerShape(14.dp),
+                            shape = RoundedCornerShape(50),
                         ) { Text("Réautoriser") }
                     }
                     Text(
@@ -202,9 +287,43 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
         item {
             SectionCard(
                 modifier = Modifier.padding(horizontal = 16.dp),
+                title = "Apparence",
+                subtitle = "Material You : les couleurs suivent votre fond d'écran.",
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        Icons.Rounded.Palette,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
+                    Spacer(Modifier.size(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Couleurs dynamiques", style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                                "Palette Material You de l'appareil"
+                            } else {
+                                "Nécessite Android 12 ou plus"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(
+                        checked = state.settings.dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S,
+                        onCheckedChange = { vm.setDynamicColor(it) },
+                        enabled = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S,
+                    )
+                }
+            }
+        }
+
+        item {
+            SectionCard(
+                modifier = Modifier.padding(horizontal = 16.dp),
                 title = "À propos",
             ) {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
                             Icons.Rounded.CheckCircle,
@@ -213,7 +332,7 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
                             modifier = Modifier.size(16.dp),
                         )
                         Spacer(Modifier.size(8.dp))
-                        Text("S3ARCH 1.0.0 · Material 3", style = MaterialTheme.typography.bodyMedium)
+                        Text("S3ARCH 1.1.0 · Material 3 Expressive", style = MaterialTheme.typography.bodyMedium)
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
@@ -224,7 +343,7 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
                         )
                         Spacer(Modifier.size(8.dp))
                         Text(
-                            "Les clés API sont stockées uniquement sur cet appareil. VLC est requis pour la lecture.",
+                            "Les clés API restent sur cet appareil. VLC est requis pour la lecture.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )

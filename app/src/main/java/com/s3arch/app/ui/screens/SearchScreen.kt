@@ -2,7 +2,9 @@ package com.s3arch.app.ui.screens
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -12,6 +14,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -28,21 +31,19 @@ import androidx.compose.material.icons.rounded.LeakAdd
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.TravelExplore
 import androidx.compose.material.icons.rounded.Upload
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -52,17 +53,19 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.s3arch.app.data.TorrentResult
-import com.s3arch.app.data.Tracker
+import com.s3arch.app.data.TrackerSource
 import com.s3arch.app.ui.S3archViewModel
 import com.s3arch.app.ui.UiState
 import com.s3arch.app.ui.components.EmptyState
 import com.s3arch.app.ui.components.Pill
 import com.s3arch.app.ui.components.ScreenHeader
+import com.s3arch.app.ui.components.scaleOnPress
 import com.s3arch.app.util.formatBytes
 
 @Composable
 fun SearchScreen(state: UiState, vm: S3archViewModel) {
     var query by rememberSaveable { mutableStateOf(state.query) }
+    val sources = state.settings.sources()
 
     Column(
         modifier = Modifier
@@ -72,6 +75,7 @@ fun SearchScreen(state: UiState, vm: S3archViewModel) {
         ScreenHeader(
             title = "S3ARCH",
             subtitle = "Recherche multi-trackers",
+            eyebrow = "Torrents · Freebox · VLC",
             icon = Icons.Rounded.TravelExplore,
         )
 
@@ -82,7 +86,9 @@ fun SearchScreen(state: UiState, vm: S3archViewModel) {
                     query = it
                     vm.setQuery(it)
                 },
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 62.dp),
                 placeholder = { Text("Film, série, album, logiciel…") },
                 leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
                 trailingIcon = {
@@ -96,10 +102,13 @@ fun SearchScreen(state: UiState, vm: S3archViewModel) {
                     }
                 },
                 singleLine = true,
-                shape = RoundedCornerShape(20.dp),
+                textStyle = MaterialTheme.typography.titleMedium,
+                shape = RoundedCornerShape(26.dp),
                 colors = OutlinedTextFieldDefaults.colors(
-                    focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                    focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    focusedBorderColor = MaterialTheme.colorScheme.primary,
+                    unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
                 ),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                 keyboardActions = KeyboardActions(onSearch = { vm.search(query) }),
@@ -114,29 +123,25 @@ fun SearchScreen(state: UiState, vm: S3archViewModel) {
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Tracker.entries.forEach { tracker ->
-                    val configured = state.settings.isConfigured(tracker)
-                    val selected = tracker.id in state.settings.enabledTrackers
-                    FilterChip(
+                sources.forEach { source ->
+                    val configured = source.isConfigured
+                    val selected = source.id in state.settings.enabledTrackers
+                    SourceChip(
+                        label = source.label,
                         selected = selected && configured,
+                        configured = configured,
                         onClick = {
                             if (configured) {
-                                vm.toggleTracker(tracker)
+                                vm.toggleTracker(source)
                             } else {
-                                vm.message("Ajoutez la clé ${tracker.label} dans les réglages")
+                                vm.message("Ajoutez la clé ${source.label} dans les réglages")
                             }
                         },
-                        label = { Text(tracker.label) },
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.18f),
-                            selectedLabelColor = MaterialTheme.colorScheme.primary,
-                        ),
-                        enabled = true,
                     )
                 }
             }
 
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(12.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
                     Icons.Rounded.ArrowDownward,
@@ -165,7 +170,7 @@ fun SearchScreen(state: UiState, vm: S3archViewModel) {
             LinearProgressIndicator(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(2.dp),
+                    .height(3.dp),
             )
         }
 
@@ -192,23 +197,23 @@ fun SearchScreen(state: UiState, vm: S3archViewModel) {
             } else {
                 EmptyState(
                     icon = Icons.Rounded.TravelExplore,
-                    title = "Cherchez sur les trois trackers",
-                    subtitle = "Les résultats de C411, TR4KER et V3X sont fusionnés et classés par taille croissante.",
+                    title = "Cherchez sur tous vos trackers",
+                    subtitle = "Les résultats sont fusionnés et classés par taille croissante, du plus léger au plus lourd.",
                 )
             }
         } else {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 28.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 items(
                     items = state.results,
-                    key = { "${it.tracker.id}-${it.id}" },
+                    key = { "${it.trackerId}-${it.id}" },
                 ) { result ->
                     ResultCard(
                         result = result,
-                        pending = "${result.tracker.id}:${result.id}" in state.pendingDownloads,
+                        pending = "${result.trackerId}:${result.id}" in state.pendingDownloads,
                         onDownload = { vm.download(result) },
                     )
                 }
@@ -218,15 +223,54 @@ fun SearchScreen(state: UiState, vm: S3archViewModel) {
 }
 
 @Composable
+private fun SourceChip(
+    label: String,
+    selected: Boolean,
+    configured: Boolean,
+    onClick: () -> Unit,
+) {
+    val interaction = remember { MutableInteractionSource() }
+    val container = when {
+        selected -> MaterialTheme.colorScheme.primary
+        else -> MaterialTheme.colorScheme.surfaceContainerHigh
+    }
+    val content = when {
+        selected -> MaterialTheme.colorScheme.onPrimary
+        configured -> MaterialTheme.colorScheme.onSurface
+        else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+    }
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(50),
+        color = container,
+        interactionSource = interaction,
+        modifier = Modifier.scaleOnPress(interaction),
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelLarge,
+            color = content,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+        )
+    }
+}
+
+@Composable
 private fun ResultCard(result: TorrentResult, pending: Boolean, onDownload: () -> Unit) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+    val interaction = remember { MutableInteractionSource() }
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(
+                1.dp,
+                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f),
+                RoundedCornerShape(28.dp),
+            ),
+        shape = RoundedCornerShape(28.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
     ) {
         Row(
-            modifier = Modifier.padding(14.dp),
+            modifier = Modifier.padding(16.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(modifier = Modifier.weight(1f)) {
@@ -237,13 +281,13 @@ private fun ResultCard(result: TorrentResult, pending: Boolean, onDownload: () -
                     maxLines = 3,
                     overflow = TextOverflow.Ellipsis,
                 )
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(10.dp))
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.horizontalScroll(rememberScrollState()),
                 ) {
-                    Pill(text = result.tracker.label, tint = MaterialTheme.colorScheme.secondary)
+                    Pill(text = result.trackerLabel, tint = MaterialTheme.colorScheme.secondary)
                     Pill(
                         text = formatBytes(result.sizeBytes),
                         tint = MaterialTheme.colorScheme.primary,
@@ -261,22 +305,27 @@ private fun ResultCard(result: TorrentResult, pending: Boolean, onDownload: () -
                     )
                 }
             }
-            Spacer(Modifier.size(8.dp))
+            Spacer(Modifier.size(10.dp))
             Box(contentAlignment = Alignment.Center) {
                 if (pending) {
-                    CircularProgressIndicator(modifier = Modifier.size(26.dp), strokeWidth = 2.dp)
+                    CircularProgressIndicator(modifier = Modifier.size(28.dp), strokeWidth = 2.5.dp)
                 } else {
-                    IconButton(
+                    Surface(
                         onClick = onDownload,
+                        shape = RoundedCornerShape(20.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        interactionSource = interaction,
                         modifier = Modifier
-                            .size(44.dp)
-                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.16f), RoundedCornerShape(14.dp)),
+                            .size(52.dp)
+                            .scaleOnPress(interaction),
                     ) {
-                        Icon(
-                            Icons.Rounded.Download,
-                            contentDescription = "Télécharger sur la Freebox",
-                            tint = MaterialTheme.colorScheme.primary,
-                        )
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                Icons.Rounded.Download,
+                                contentDescription = "Télécharger sur la Freebox",
+                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                            )
+                        }
                     }
                 }
             }

@@ -15,6 +15,7 @@ import com.s3arch.app.data.TorrentResult
 import com.s3arch.app.data.TorznabClient
 import com.s3arch.app.data.Tracker
 import com.s3arch.app.data.TrackerException
+import com.s3arch.app.data.TrackerSource
 import com.s3arch.app.data.TrackedDownload
 import com.s3arch.app.data.VlcProxyServer
 import com.s3arch.app.util.VlcLauncher
@@ -82,10 +83,29 @@ class S3archViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(query = query) }
     }
 
-    fun toggleTracker(tracker: Tracker) {
+    fun toggleTracker(source: TrackerSource) {
         val enabled = _state.value.settings.enabledTrackers
-        val updated = if (tracker.id in enabled) enabled - tracker.id else enabled + tracker.id
+        val updated = if (source.id in enabled) enabled - source.id else enabled + source.id
         viewModelScope.launch { repo.setEnabledTrackers(updated) }
+    }
+
+    fun addCustomTracker(label: String, url: String, key: String) {
+        if (label.isBlank() || url.isBlank()) {
+            message("Nom et URL Torznab obligatoires")
+            return
+        }
+        viewModelScope.launch {
+            repo.addCustomTracker(label, url, key)
+            message("Tracker « $label » ajouté")
+        }
+    }
+
+    fun removeCustomTracker(id: String) {
+        viewModelScope.launch { repo.removeCustomTracker(id) }
+    }
+
+    fun setDynamicColor(enabled: Boolean) {
+        viewModelScope.launch { repo.setDynamicColor(enabled) }
     }
 
     fun search(query: String = _state.value.query) {
@@ -95,10 +115,8 @@ class S3archViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
         val settings = _state.value.settings
-        val trackers = Tracker.entries.filter {
-            it.id in settings.enabledTrackers && settings.isConfigured(it)
-        }
-        if (trackers.isEmpty()) {
+        val sources = settings.enabledSources()
+        if (sources.isEmpty()) {
             message("Ajoutez une clé API dans les réglages pour lancer une recherche")
             return
         }
@@ -106,16 +124,9 @@ class S3archViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             _state.update { it.copy(searching = true, query = term, trackerErrors = emptyMap()) }
             val outcomes = coroutineScope {
-                trackers.map { tracker ->
+                sources.map { source ->
                     async {
-                        tracker to runCatching {
-                            torznab.search(
-                                tracker = tracker,
-                                baseUrl = settings.urlFor(tracker),
-                                apiKey = settings.keyFor(tracker),
-                                query = term,
-                            )
-                        }
+                        source to runCatching { torznab.search(source, term) }
                     }
                 }.awaitAll()
             }
@@ -147,7 +158,7 @@ class S3archViewModel(app: Application) : AndroidViewModel(app) {
     // ------------------------------------------------------------------ telechargement
 
     fun download(result: TorrentResult) {
-        val key = "${result.tracker.id}:${result.id}"
+        val key = "${result.trackerId}:${result.id}"
         if (key in _state.value.pendingDownloads) return
         _state.update { it.copy(pendingDownloads = it.pendingDownloads + key) }
 
@@ -164,10 +175,11 @@ class S3archViewModel(app: Application) : AndroidViewModel(app) {
                     TrackedDownload(
                         taskId = taskId,
                         title = result.title,
-                        tracker = result.tracker.label,
+                        tracker = result.trackerLabel,
                         folder = settings.freeboxDownloadDir,
                         addedAt = System.currentTimeMillis(),
                         sizeBytes = result.sizeBytes,
+                        seeders = result.seeders,
                     ),
                 )
                 _state.update { it.copy(message = "Téléchargement lancé sur la Freebox") }
@@ -343,10 +355,10 @@ class S3archViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun testTracker(tracker: Tracker, apiKey: String, baseUrl: String) {
+    fun testTracker(source: TrackerSource) {
         viewModelScope.launch {
             _state.update { it.copy(searching = true) }
-            val outcome = runCatching { torznab.testConnection(tracker, baseUrl, apiKey) }
+            val outcome = runCatching { torznab.testConnection(source) }
             _state.update { it.copy(searching = false) }
             message(
                 outcome.getOrElse { e ->

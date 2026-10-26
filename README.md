@@ -1,14 +1,22 @@
 # S3ARCH
 
-Application Android **Material 3** pour chercher un contenu sur plusieurs trackers torrent
-(C411, TR4KER, V3X), lancer le téléchargement directement sur la **Freebox** via l'API
-officielle Freebox OS, suivre la progression en temps réel et lire le fichier avec **VLC**.
+**Version 1.1.0**
+
+Application Android **Material 3 Expressive** (avec **Material You** : couleurs dynamiques issues du
+fond d'écran sur Android 12+) pour chercher un contenu sur plusieurs trackers torrent
+(C411, TR4KER, V3X et tout endpoint Torznab tiers), lancer le téléchargement directement sur la
+**Freebox** via l'API officielle Freebox OS, suivre la progression en temps réel et lire le fichier
+avec **VLC**.
 
 ## Fonctionnalités
 
 - **Recherche multi-trackers** : C411, TR4KER et V3X (protocole Torznab), requêtes en parallèle,
   fusion des résultats.
+- **Trackers tiers** : ajout d'un endpoint Torznab personnalisé, avec avertissement explicite que
+  la compatibilité n'est **pas garantie**.
 - **Tri automatique du plus petit au plus grand** (taille inconnue en fin de liste).
+- **Transferts détaillés** : nombre de seeders du torrent et débit courant en **Mbps**, en plus du
+  pourcentage, du volume et du temps restant.
 - **Clés API demandées au premier démarrage** puis enregistrées localement (modifiables
   dans les réglages, avec test de connexion par tracker).
 - **Connexion Freebox au premier démarrage** : découverte de l'API, autorisation officielle
@@ -27,7 +35,15 @@ officielle Freebox OS, suivre la progression en temps réel et lire le fichier a
 | Configuration (1er lancement) | Étape 1 : clés API C411 / TR4KER / V3X (+ endpoint Torznab editable). Étape 2 : adresse Freebox + dossier + autorisation. |
 | Recherche | Barre de recherche, filtres par tracker, résultats triés par taille croissante, bouton de téléchargement. |
 | Transferts | Cartes de téléchargement avec progression temps réel, débit, ETA, bouton « Lire avec VLC ». |
-| Réglages | Clés API, endpoints, dossier Freebox, session/re-autorisation. |
+| Réglages | Clés API, trackers tiers Torznab, dossier Freebox, session/re-autorisation, couleurs dynamiques. |
+
+## Trackers tiers (Torznab)
+
+Un texte discret « Ajouter un tracker Torznab tiers » est disponible à l'étape 1 du premier
+lancement et dans les réglages. Il ouvre un formulaire (nom, endpoint Torznab, clé) précédé d'un
+message clair : S3ARCH ne se base que sur le protocole Torznab standard, donc **la compatibilité
+avec un tracker tiers n'est pas garantie**. Le tracker ajouté apparaît ensuite dans les filtres de
+recherche et peut être testé ou retiré depuis les réglages.
 
 ## Configuration des trackers
 
