@@ -28,6 +28,7 @@ import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.StopCircle
 import androidx.compose.material.icons.rounded.Timer
 import androidx.compose.material.icons.rounded.Upload
+import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -81,6 +82,7 @@ fun DownloadsScreen(state: UiState, vm: S3archViewModel) {
     val totalRate = state.tasks.values.sumOf { it.rxRate }
     val finished = state.tracked.count { state.tasks[it.taskId]?.isDone == true }
     var confirmDelete by remember { mutableStateOf<TrackedDownload?>(null) }
+    var confirmHide by remember { mutableStateOf<TrackedDownload?>(null) }
 
     Column(
         modifier = Modifier
@@ -139,6 +141,7 @@ fun DownloadsScreen(state: UiState, vm: S3archViewModel) {
                         onPlay = { vm.play(context, download) },
                         onCancel = { vm.cancelDownload(download) },
                         onDelete = { confirmDelete = download },
+                        onHide = { confirmHide = download },
                     )
                 }
             }
@@ -173,6 +176,35 @@ fun DownloadsScreen(state: UiState, vm: S3archViewModel) {
             },
         )
     }
+
+    // Le masquage ne touche ni la Freebox ni le disque : on explique ce qui est conserve.
+    val hidden = confirmHide
+    if (hidden != null) {
+        AlertDialog(
+            onDismissRequest = { confirmHide = null },
+            icon = { Icon(Icons.Rounded.VisibilityOff, contentDescription = null) },
+            title = { Text("Masquer ce transfert ?") },
+            text = {
+                Text(
+                    "« ${hidden.title} » disparaîtra de cette liste. Le téléchargement continue " +
+                        "et les fichiers restent sur la Freebox : rien n'est supprimé du disque.",
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        vm.hideDownload(hidden)
+                        confirmHide = null
+                    },
+                ) {
+                    Text("Masquer")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmHide = null }) { Text("Annuler") }
+            },
+        )
+    }
 }
 
 @Composable
@@ -184,6 +216,7 @@ private fun DownloadCard(
     onPlay: () -> Unit,
     onCancel: () -> Unit,
     onDelete: () -> Unit,
+    onHide: () -> Unit,
 ) {
     val progress = task?.progress ?: 0f
     val done = task?.isDone == true
@@ -394,6 +427,25 @@ private fun DownloadCard(
                     "Supprimer du disque",
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.error,
+                )
+            }
+
+            // Masquage : la tache et les fichiers restent sur la Freebox.
+            TextButton(
+                onClick = onHide,
+                enabled = !busy,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Icon(
+                    Icons.Rounded.VisibilityOff,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(Modifier.size(8.dp))
+                Text(
+                    "Masquer de la liste",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }

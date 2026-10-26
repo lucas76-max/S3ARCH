@@ -307,6 +307,29 @@ class S3archViewModel(app: Application) : AndroidViewModel(app) {
         removeTask(download, eraseFiles = true, success = "Fichiers supprimés du disque")
     }
 
+    /**
+     * Masque un transfert de la liste suivie par l'app.
+     *
+     * Aucun appel a la Freebox : la tache continue son cours et les fichiers restent
+     * sur le disque. Seule l'entree locale disparait, ce qui permet de nettoyer la
+     * liste sans rien perdre. Retrouvable dans Freebox Files, ou en relancant un
+     * telechargement du meme contenu.
+     */
+    fun hideDownload(download: TrackedDownload) {
+        val id = download.taskId
+        _state.update {
+            it.copy(
+                tracked = it.tracked.filterNot { tracked -> tracked.taskId == id },
+                tasks = it.tasks - id,
+                message = "Transfert masqué — le fichier reste sur la Freebox",
+            )
+        }
+        viewModelScope.launch {
+            runCatching { repo.removeDownload(id) }
+                .onFailure { AppLog.error("Download", "Masquage de $id impossible : ${it.message}") }
+        }
+    }
+
     private fun removeTask(download: TrackedDownload, eraseFiles: Boolean, success: String) {
         val id = download.taskId
         if (id in _state.value.actionIds) return

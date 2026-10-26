@@ -1,6 +1,6 @@
 # S3ARCH
 
-**Version 1.6.1**
+**Version 1.6.2**
 
 Application Android **Material 3 Expressive** (avec **Material You** : couleurs dynamiques issues du
 fond d'écran sur Android 12+) pour chercher un contenu sur plusieurs trackers torrent
@@ -123,9 +123,12 @@ les endpoints officiels :
 |---|---|---|
 | Annuler | `DELETE /downloads/{id}` | Arrête la tâche et la retire de la file, **fichiers conservés** |
 | Supprimer du disque | `DELETE /downloads/{id}/erase` | Retire la tâche **et efface les fichiers** |
+| Masquer de la liste | aucun | Retire seulement l'entrée de l'app : **tâche et fichiers intacts** |
 
-Dans les deux cas l'entrée disparaît de la liste suivie par l'app, et une confirmation est
-demandée avant l'effacement sur le disque.
+Dans les trois cas l'entrée disparaît de la liste suivie par l'app, et une confirmation est
+demandée avant d'effacer sur le disque comme avant de masquer. Le masquage ne fait aucun appel
+à la Freebox : le transfert continue, les fichiers restent sur le disque et sont toujours
+visibles dans Freebox Files.
 
 ## Lecture VLC
 
