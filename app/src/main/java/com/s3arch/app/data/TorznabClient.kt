@@ -2,6 +2,8 @@ package com.s3arch.app.data
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import com.s3arch.app.util.AppLog
+import com.s3arch.app.util.DownloadUrls
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.Request
 import org.xmlpull.v1.XmlPullParser
@@ -31,8 +33,11 @@ class TorznabClient {
             if (httpUrl.queryParameter("extended") == null) builder.addQueryParameter("extended", "1")
             if (httpUrl.queryParameter("limit") == null) builder.addQueryParameter("limit", "100")
 
+            val built = builder.build()
+            AppLog.info("Tracker", "${source.label} : recherche « $query » → ${AppLog.redact(built.toString())}")
+
             val request = Request.Builder()
-                .url(builder.build())
+                .url(built)
                 .header("Accept", "application/rss+xml, application/xml, text/xml, */*")
                 .get()
                 .build()
@@ -41,21 +46,71 @@ class TorznabClient {
             response.use { resp ->
                 val body = resp.body?.string().orEmpty()
                 if (!resp.isSuccessful) {
-                    throw TrackerException(
-                        when (resp.code) {
-                            401, 403 -> "${source.label} : cle API refusee (${resp.code})"
-                            404 -> "${source.label} : endpoint introuvable (verifiez l'URL Torznab)"
-                            else -> "${source.label} : erreur HTTP ${resp.code}"
-                        },
-                    )
+                    val message = when (resp.code) {
+                        401, 403 -> "${source.label} : cle API refusee (${resp.code})"
+                        404 -> "${source.label} : endpoint introuvable (verifiez l'URL Torznab)"
+                        else -> "${source.label} : erreur HTTP ${resp.code}"
+                    }
+                    AppLog.error("Tracker", message)
+                    throw TrackerException(message)
                 }
-                if (body.isBlank()) return@use emptyList()
+                if (body.isBlank()) {
+                    AppLog.warn("Tracker", "${source.label} : reponse vide")
+                    return@use emptyList()
+                }
                 if (!body.trimStart().startsWith("<")) {
-                    throw TrackerException("${source.label} : reponse inattendue (URL Torznab incorrecte ?)")
+                    val message = "${source.label} : reponse inattendue (URL Torznab incorrecte ?)"
+                    AppLog.error("Tracker", message)
+                    throw TrackerException(message)
                 }
-                parseItems(body, source)
+                val parsed = parseItems(body, source)
+                AppLog.info("Tracker", "${source.label} : ${parsed.size} resultats (HTTP ${resp.code})")
+                parsed
             }
         }
+
+    /**
+     * Recupere le fichier .torrent depuis le tracker, cote telephone.
+     *
+     * Envoyer le fichier directement a la Freebox evite les refus « invalid_url » :
+     * la Freebox n'a plus besoin d'atteindre le tracker elle-meme.
+     */
+    suspend fun fetchTorrent(url: String): ByteArray = withContext(Dispatchers.IO) {
+        val target = DownloadUrls.sanitize(url)
+        if (target.isBlank() || !DownloadUrls.isHttp(target)) {
+            throw TrackerException("Lien .torrent inutilisable : $target")
+        }
+        AppLog.info("Tracker", "Recuperation du .torrent ${AppLog.redact(target)}")
+
+        val request = Request.Builder()
+            .url(target)
+            .header("Accept", "application/x-bittorrent, application/octet-stream, */*")
+            .header("User-Agent", "S3ARCH/1.3 (Android)")
+            .get()
+            .build()
+
+        val response = Network.http.newCall(request).execute()
+        response.use { resp ->
+            if (!resp.isSuccessful) {
+                val message = "Le tracker a refuse le .torrent (HTTP ${resp.code})"
+                AppLog.warn("Tracker", message)
+                throw TrackerException(message)
+            }
+            val bytes = resp.body?.bytes() ?: ByteArray(0)
+            if (bytes.isEmpty()) throw TrackerException("Fichier .torrent vide")
+            if (bytes.size > 8 * 1024 * 1024) throw TrackerException("Fichier .torrent trop volumineux")
+
+            val probe = String(bytes.copyOfRange(0, minOf(bytes.size, 4096)), Charsets.ISO_8859_1)
+            val looksLikeTorrent = probe.startsWith("d") && probe.contains("4:info")
+            if (!looksLikeTorrent) {
+                val message = "Le lien ne renvoie pas un .torrent (page HTML ou erreur du tracker)"
+                AppLog.warn("Tracker", message)
+                throw TrackerException(message)
+            }
+            AppLog.info("Tracker", "Torrent recupere (${bytes.size} octets)")
+            bytes
+        }
+    }
 
     /** Verifie la cle API et l'URL Torznab avec une vraie recherche de test. */
     suspend fun testConnection(source: TrackerSource): String = withContext(Dispatchers.IO) {
@@ -186,12 +241,18 @@ class TorznabClient {
 
         val link = values["link"]?.trim()
         val guid = values["guid"]?.trim()
-        val magnet = attrs["magneturl"] ?: link?.takeIf { it.startsWith("magnet:") }
-        val downloadUrl = enclosure?.takeIf { it.isNotBlank() }
+        val magnet = DownloadUrls.sanitize(
+            attrs["magneturl"] ?: link?.takeIf { DownloadUrls.isMagnet(it) },
+            source.url,
+        ).takeIf { it.isNotBlank() }
+
+        val candidate = enclosure?.takeIf { it.isNotBlank() }
             ?: link?.takeIf { it.startsWith("http") && (it.contains(".torrent") || it.contains("download")) }
             ?: guid?.takeIf { it.startsWith("http") && it.contains(".torrent") }
             ?: magnet
             ?: ""
+        // Les URL relatives, les espaces et les entites HTML sont normalises ici.
+        val downloadUrl = DownloadUrls.sanitize(candidate, source.url).ifBlank { magnet ?: "" }
 
         val id = guid?.takeIf { it.isNotBlank() }
             ?: attrs["infohash"]

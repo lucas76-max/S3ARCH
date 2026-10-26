@@ -1,6 +1,8 @@
 package com.s3arch.app.data
 
 import android.util.Base64
+import com.s3arch.app.util.AppLog
+import com.s3arch.app.util.DownloadUrls
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -19,6 +21,7 @@ import kotlinx.serialization.json.put
 import okhttp3.FormBody
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -76,11 +79,13 @@ class FreeboxApi {
                 response.body?.string().orEmpty()
             }
         } catch (e: FreeboxException) {
+            AppLog.error("Freebox", "Decouverte impossible : ${e.message}")
             throw e
         } catch (e: Exception) {
-            throw FreeboxException(
-                "Freebox injoignable sur $host. Verifiez que le telephone est sur le meme reseau Wi-Fi. (${e.message})",
-            )
+            val message =
+                "Freebox injoignable sur $host. Verifiez que le telephone est sur le meme reseau Wi-Fi. (${e.message})"
+            AppLog.error("Freebox", message)
+            throw FreeboxException(message)
         }
 
         val root = runCatching { json.parseToJsonElement(body).jsonObject }.getOrNull()
@@ -179,6 +184,7 @@ class FreeboxApi {
         appToken = token
         baseUrl = "http://$cleanHost$normalizedBase"
         sessionToken = session
+        AppLog.info("Freebox", "Session ouverte sur $cleanHost$normalizedBase")
     }
 
     private suspend fun ensureSession() {
@@ -202,6 +208,9 @@ class FreeboxApi {
                     put("dirname", part)
                 }
                 authCall("/fs/mkdir/", "POST", payload)
+            }.onFailure {
+                // « existe deja » est normal : le dossier est cree une seule fois.
+                AppLog.warn("Freebox", "mkdir $parent$part : ${it.message}")
             }
             parent = "$parent$part/"
         }
@@ -217,22 +226,73 @@ class FreeboxApi {
      */
     suspend fun addDownload(url: String, dir: String): String = withContext(Dispatchers.IO) {
         ensureSession()
-        val link = url.trim()
-        if (link.isBlank()) throw FreeboxException("Lien de telechargement absent pour ce torrent")
+        val link = DownloadUrls.sanitize(url)
+        if (link.isBlank()) {
+            throw FreeboxException(
+                "Lien de telechargement inutilisable (URL relative ou mal formee)",
+                "invalid_url",
+            )
+        }
+        val target = normalizeDir(dir)
+        AppLog.info("Freebox", "POST /downloads/add/ dir=$target url=${AppLog.redact(link)}")
         val element = authFormCall(
             "/downloads/add/",
             listOf(
                 "download_url" to link,
-                "download_dir" to b64(normalizeDir(dir)),
+                "download_dir" to b64(target),
             ),
         )
         val id = element.findAddedTaskId()
-        if (id != null) return@withContext id
+        if (id != null) {
+            AppLog.info("Freebox", "Tache creee : $id")
+            return@withContext id
+        }
 
         // Certaines versions ne renvoient pas l'id : on prend la tache la plus recente.
         val tasks = listTasks()
-        tasks.maxByOrNull { it.id.toLongOrNull() ?: 0L }?.id
+        val latest = tasks.maxByOrNull { it.id.toLongOrNull() ?: 0L }?.id
             ?: throw FreeboxException("Telechargement ajoute mais introuvable dans la liste Freebox")
+        AppLog.info("Freebox", "Tache detectee : $latest")
+        latest
+    }
+
+    /**
+     * Envoie le fichier .torrent directement a la Freebox (multipart/form-data).
+     *
+     * C'est la voie la plus fiable pour les trackers prives : la Freebox n'a pas a
+     * telecharger le .torrent elle-meme, donc plus de refus « invalid_url » ni de
+     * blocage du tracker envers l'IP de la box.
+     */
+    suspend fun addTorrentFile(
+        torrent: ByteArray,
+        dir: String,
+        fileName: String = "s3arch.torrent",
+    ): String = withContext(Dispatchers.IO) {
+        ensureSession()
+        if (torrent.isEmpty()) throw FreeboxException("Fichier .torrent vide")
+        val target = normalizeDir(dir)
+        AppLog.info("Freebox", "POST /downloads/add/ (fichier ${torrent.size} octets) dir=$target")
+
+        val body = MultipartBody.Builder()
+            .setType(MultipartBody.FORM)
+            .addFormDataPart("download_dir", b64(target))
+            .addFormDataPart(
+                "download_file",
+                fileName,
+                torrent.toRequestBody("application/x-bittorrent".toMediaType()),
+            )
+            .build()
+
+        val element = authMultipartCall("/downloads/add/", body)
+        val id = element.findAddedTaskId()
+        if (id != null) {
+            AppLog.info("Freebox", "Tache creee depuis le fichier : $id")
+            return@withContext id
+        }
+        val latest = listTasks().maxByOrNull { it.id.toLongOrNull() ?: 0L }?.id
+            ?: throw FreeboxException("Telechargement ajoute mais introuvable dans la liste Freebox")
+        AppLog.info("Freebox", "Tache detectee : $latest")
+        latest
     }
 
     suspend fun task(id: String): FreeboxTask? = withContext(Dispatchers.IO) {
@@ -290,6 +350,17 @@ class FreeboxApi {
         }
     }
 
+    private suspend fun authMultipartCall(path: String, body: MultipartBody): JsonElement {
+        val base = baseUrl ?: throw FreeboxException("Freebox non connectee")
+        val token = sessionToken ?: throw FreeboxException("Session Freebox absente")
+        return try {
+            rawMultipartCall(base + path, body, token)
+        } catch (e: FreeboxAuthException) {
+            renewSession()
+            rawMultipartCall(base + path, body, sessionToken)
+        }
+    }
+
     /** Appel POST en application/x-www-form-urlencoded (requis par /downloads/add/). */
     private suspend fun authFormCall(path: String, params: List<Pair<String, String>>): JsonElement {
         val base = baseUrl ?: throw FreeboxException("Freebox non connectee")
@@ -338,6 +409,13 @@ class FreeboxApi {
         return readResponse(streamClient.newCall(builder.build()).execute())
     }
 
+    private fun rawMultipartCall(url: String, body: MultipartBody, auth: String?): JsonElement {
+        val parsed = url.toHttpUrlOrNull() ?: throw FreeboxException("URL Freebox invalide : $url")
+        val builder = Request.Builder().url(parsed).post(body)
+        if (!auth.isNullOrBlank()) builder.header("X-Fbx-App-Auth", auth)
+        return readResponse(streamClient.newCall(builder.build()).execute())
+    }
+
     private fun readResponse(response: Response): JsonElement = response.use {
         val text = it.body?.string().orEmpty()
         val root = runCatching { json.parseToJsonElement(text).jsonObject }.getOrNull()
@@ -348,10 +426,14 @@ class FreeboxApi {
             val msg = root["msg"]?.jsonPrimitive?.contentOrNull
                 ?: root["error"]?.jsonPrimitive?.contentOrNull
                 ?: "Erreur Freebox"
+            AppLog.error("Freebox", "HTTP ${it.code} ${code ?: "?"} : ${text.take(300)}")
             if (code == "auth_required" || code == "invalid_session") throw FreeboxAuthException(msg)
-            throw FreeboxException(SafeErrors.describe(code, msg))
+            throw FreeboxException(SafeErrors.describe(code, msg), code)
         }
-        if (!it.isSuccessful) throw FreeboxException("Erreur Freebox HTTP ${it.code}")
+        if (!it.isSuccessful) {
+            AppLog.error("Freebox", "HTTP ${it.code} : ${text.take(300)}")
+            throw FreeboxException("Erreur Freebox HTTP ${it.code}")
+        }
         root["result"] ?: JsonObject(emptyMap())
     }
 
@@ -435,7 +517,7 @@ class FreeboxApi {
     companion object {
         const val APP_ID = "com.s3arch.app"
         const val APP_NAME = "S3ARCH"
-        const val APP_VERSION = "1.2.0"
+        const val APP_VERSION = "1.3.0"
         const val DEFAULT_DIR = "/Disque dur/S3ARCH"
     }
 }
@@ -460,5 +542,5 @@ internal object SafeErrors {
     }
 }
 
-class FreeboxException(message: String) : Exception(message)
+class FreeboxException(message: String, val code: String? = null) : Exception(message)
 class FreeboxAuthException(message: String) : Exception(message)

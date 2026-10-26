@@ -3,6 +3,7 @@ package com.s3arch.app.ui.screens
 import android.os.Build
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -12,10 +13,13 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.ErrorOutline
@@ -27,10 +31,13 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -38,7 +45,11 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.s3arch.app.data.MediaType
 import com.s3arch.app.data.Tracker
 import com.s3arch.app.data.TrackerSource
@@ -51,6 +62,7 @@ import com.s3arch.app.ui.components.ScreenHeader
 import com.s3arch.app.ui.components.SectionCard
 import com.s3arch.app.ui.components.StatusDot
 import com.s3arch.app.ui.components.TrackerKeyEditor
+import com.s3arch.app.util.AppLog
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -361,6 +373,74 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
         }
 
         item {
+            val logs by AppLog.entries.collectAsState()
+            val clipboard = LocalClipboardManager.current
+            val logScroll = rememberScrollState()
+            LaunchedEffect(logs.size) {
+                if (logs.isNotEmpty()) logScroll.animateScrollTo(logScroll.maxValue)
+            }
+
+            SectionCard(
+                modifier = Modifier.padding(horizontal = 16.dp),
+                title = "Journaux",
+                subtitle = "Dernières opérations trackers et Freebox. Clés API, passkeys et jetons sont masqués.",
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                        shape = RoundedCornerShape(18.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 120.dp, max = 280.dp)
+                                .verticalScroll(logScroll)
+                                .padding(12.dp),
+                        ) {
+                            if (logs.isEmpty()) {
+                                Text(
+                                    "Aucun evenement pour l'instant. Lancez une recherche ou un telechargement.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            } else {
+                                Text(
+                                    text = logs.takeLast(200).joinToString("\n") { it.format() },
+                                    style = MaterialTheme.typography.bodySmall.copy(
+                                        fontFamily = FontFamily.Monospace,
+                                        fontSize = 11.sp,
+                                    ),
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                )
+                            }
+                        }
+                    }
+                    Text(
+                        "Journal de la session en cours (${logs.size}/500 entrees). " +
+                            "Copiez-le pour diagnostiquer un refus de la Freebox ou d'un tracker.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        OutlinedButton(
+                            onClick = { clipboard.setText(AnnotatedString(AppLog.asText())) },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(50),
+                            enabled = logs.isNotEmpty(),
+                        ) { Text("Copier") }
+                        OutlinedButton(
+                            onClick = { AppLog.clear() },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(50),
+                            enabled = logs.isNotEmpty(),
+                        ) { Text("Effacer") }
+                    }
+                }
+            }
+        }
+
+        item {
             SectionCard(
                 modifier = Modifier.padding(horizontal = 16.dp),
                 title = "À propos",
@@ -374,7 +454,7 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
                             modifier = Modifier.size(16.dp),
                         )
                         Spacer(Modifier.size(8.dp))
-                        Text("S3ARCH 1.2.0 · Material 3 Expressive", style = MaterialTheme.typography.bodyMedium)
+                        Text("S3ARCH 1.3.0 · Material 3 Expressive", style = MaterialTheme.typography.bodyMedium)
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(

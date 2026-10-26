@@ -20,6 +20,8 @@ import com.s3arch.app.data.TrackerException
 import com.s3arch.app.data.TrackerSource
 import com.s3arch.app.data.TrackedDownload
 import com.s3arch.app.data.VlcProxyServer
+import com.s3arch.app.util.AppLog
+import com.s3arch.app.util.DownloadUrls
 import com.s3arch.app.util.VlcLauncher
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -182,18 +184,19 @@ class S3archViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             try {
                 val settings = _state.value.settings
+                val folder = settings.freeboxDownloadDir
                 ensureFreebox(settings)
-                runCatching { freebox.ensureFolder(settings.freeboxDownloadDir) }
-                    .onFailure { throw FreeboxException("Dossier « ${settings.freeboxDownloadDir} » : ${it.message}") }
+                runCatching { freebox.ensureFolder(folder) }
+                    .onFailure { throw FreeboxException("Dossier « $folder » : ${it.message}") }
 
-                val link = result.downloadUrl.ifBlank { result.magnet.orEmpty() }
-                val taskId = freebox.addDownload(link, settings.freeboxDownloadDir)
+                AppLog.info("Download", "« ${result.title} » (${result.trackerLabel})")
+                val taskId = launchDownload(result, folder)
                 repo.addDownload(
                     TrackedDownload(
                         taskId = taskId,
                         title = result.title,
                         tracker = result.trackerLabel,
-                        folder = settings.freeboxDownloadDir,
+                        folder = folder,
                         addedAt = System.currentTimeMillis(),
                         sizeBytes = result.sizeBytes,
                         seeders = result.seeders,
@@ -202,11 +205,60 @@ class S3archViewModel(app: Application) : AndroidViewModel(app) {
                 _state.update { it.copy(message = "Téléchargement lancé sur la Freebox") }
                 refreshDownloads()
             } catch (e: Exception) {
+                AppLog.error("Download", "Echec : ${e.message}")
                 _state.update { it.copy(message = e.message ?: "Impossible de lancer le téléchargement") }
             } finally {
                 _state.update { it.copy(pendingDownloads = it.pendingDownloads - key) }
             }
         }
+    }
+
+    /**
+     * Trois strategies, de la plus fiable a la plus permissive :
+     *  1. le telephone telecharge le .torrent et l'envoie en fichier a la Freebox ;
+     *  2. sinon on passe le lien au gestionnaire Freebox (http/https/ftp) ;
+     *  3. en dernier recours, le lien magnet.
+     * La Freebox refuse souvent les URL (`invalid_url`) : la voie fichier l'evite.
+     */
+    private suspend fun launchDownload(result: TorrentResult, folder: String): String {
+        val torrentUrl = result.downloadUrl.takeIf { DownloadUrls.isHttp(it) }
+        val magnet = result.magnet?.takeIf { DownloadUrls.isMagnet(it) }
+        var lastError: Throwable? = null
+
+        if (torrentUrl != null) {
+            val outcome = runCatching {
+                val torrent = torznab.fetchTorrent(torrentUrl)
+                freebox.addTorrentFile(torrent, folder, torrentFileName(result.title))
+            }
+            outcome.getOrNull()?.let { return it }
+            lastError = outcome.exceptionOrNull()
+            AppLog.warn("Download", "Envoi du fichier .torrent impossible : ${lastError?.message}")
+        }
+
+        val link = torrentUrl ?: magnet
+        if (link != null) {
+            val outcome = runCatching { freebox.addDownload(link, folder) }
+            outcome.getOrNull()?.let { return it }
+            lastError = outcome.exceptionOrNull() ?: lastError
+            AppLog.warn("Download", "Ajout par URL refuse : ${lastError?.message}")
+        }
+
+        if (magnet != null && magnet != link) {
+            val outcome = runCatching { freebox.addDownload(magnet, folder) }
+            outcome.getOrNull()?.let { return it }
+            lastError = outcome.exceptionOrNull() ?: lastError
+            AppLog.warn("Download", "Ajout par magnet refuse : ${lastError?.message}")
+        }
+
+        throw lastError ?: FreeboxException("Aucun lien de téléchargement pour ce torrent")
+    }
+
+    private fun torrentFileName(title: String): String {
+        val base = title.replace(Regex("[^A-Za-z0-9._-]+"), "_")
+            .trim('_', '.')
+            .take(60)
+            .ifBlank { "s3arch" }
+        return "$base.torrent"
     }
 
     fun refreshDownloads() {
