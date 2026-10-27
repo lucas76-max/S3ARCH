@@ -1,6 +1,6 @@
 # S3ARCH
 
-**Version 1.3.1**
+**Version 1.3.2**
 
 Application Android **Material You** (couleurs dynamiques issues du fond d'écran sur Android 12+,
 ou palette d'accent personnalisée quand elles sont désactivées) pour chercher un contenu sur

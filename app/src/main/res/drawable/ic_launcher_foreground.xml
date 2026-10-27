@@ -1,36 +1,39 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+    Hexagone blanc et pictogramme « fichier + fleche » du logo fourni (SVG 1080x1080).
+    Le groupe ramene le dessin dans la zone de securite de 66 dp des icones adaptatives
+    (1080 -> 108, puis 0,75 pour la marge) : rien n'est rogne par les masques du launcher.
+-->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
 
-    <!-- Loupe -->
-    <path
-        android:pathData="M50,44 m-17,0 a17,17 0 1,0 34,0 a17,17 0 1,0 -34,0"
-        android:fillColor="#00000000"
-        android:strokeColor="#7FD8FF"
-        android:strokeWidth="6" />
-    <path
-        android:pathData="M62.5,56.5 L73,67"
-        android:strokeColor="#7FD8FF"
-        android:strokeWidth="7"
-        android:strokeLineCap="round" />
+    <group
+        android:translateX="13.5"
+        android:translateY="13.5"
+        android:scaleX="0.075"
+        android:scaleY="0.075">
 
-    <!-- Lecture -->
-    <path
-        android:pathData="M45,36 L57,44 L45,52 Z"
-        android:fillColor="#EAF6FF" />
+        <!-- Hexagone : trait de 32 unites (moitie interieure du trait de 64 du SVG). -->
+        <path
+            android:pathData="M540,102.398 L918.974,321.199 L918.974,758.801 L540,977.602 L161.026,758.801 L161.026,321.199 Z"
+            android:fillColor="#00000000"
+            android:strokeColor="#FFFFFF"
+            android:strokeWidth="32"
+            android:strokeLineJoin="round" />
 
-    <!-- Archives -->
-    <path
-        android:pathData="M31,77 L77,77"
-        android:strokeColor="#B9A8FF"
-        android:strokeWidth="5"
-        android:strokeLineCap="round" />
-    <path
-        android:pathData="M40,86 L68,86"
-        android:strokeColor="#8B7CFF"
-        android:strokeWidth="5"
-        android:strokeLineCap="round" />
+        <group
+            android:translateX="285.451"
+            android:translateY="285.451"
+            android:scaleX="5.090978"
+            android:scaleY="5.090978">
+
+            <!-- Pictogramme (viewBox 0 0 100 100). -->
+            <path
+                android:pathData="M66.977,34.402H81.96L59.143,11.673v14.896C59.143,30.893,62.659,34.402,66.977,34.402z M67.098,39.186 c-7.017,0-12.722-5.715-12.722-12.746V10H26.741c-3.815,0-6.916,3.102-6.916,6.919v66.162c0,3.817,3.1,6.919,6.916,6.919h21.168 c-0.713-0.705-11.961-11.836-18.085-17.883c-1.984-1.961-1.984-5.131,0-7.084c1.967-1.948,5.167-1.948,7.153,0 c7.806,7.714,9.516,9.393,9.516,9.393s0.005-19.262,0.005-28.104c0-2.766,2.272-5.006,5.062-5.006c2.799,0,5.06,2.24,5.06,5.006 c0,10.557-0.011,28.131-0.011,28.131s3.049-3.018,9.367-9.264c1.988-1.963,5.189-1.963,7.16,0c1.973,1.938,1.973,5.119,0,7.064 C65.629,79.689,55.9,89.305,55.201,90h22.046c3.833,0,6.928-3.102,6.928-6.919V39.186H67.098L67.098,39.186z"
+                android:fillColor="#FFFFFF" />
+        </group>
+    </group>
 </vector>
