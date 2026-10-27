@@ -4,6 +4,8 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <!-- Mise a jour de l'application depuis les releases GitHub. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <queries>
         <package android:name="org.videolan.vlc" />
@@ -24,6 +26,17 @@
 
         <!-- Le tunnel WireGuard utilise le VpnService declare par la bibliotheque
              officielle (fusion de manifeste) : rien a redouter ici. -->
+        <!-- Partage du seul APK telecharge pour la mise a jour : rien d'autre n'est expose. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
         <activity
             android:name=".ui.player.PlayerActivity"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|smallestScreenSize"

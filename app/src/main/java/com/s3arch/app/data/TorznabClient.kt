@@ -28,10 +28,13 @@ class TorznabClient {
             if (httpUrl.queryParameter("t") == null) builder.addQueryParameter("t", "search")
             if (httpUrl.queryParameter("apikey") == null) builder.addQueryParameter("apikey", source.apiKey.trim())
             if (query.isNotBlank() && httpUrl.queryParameter("q") == null) {
-                builder.addQueryParameter("q", query.trim())
+                // YGG Reborn (comme d'autres indexeurs) limite la requete a 100 caracteres.
+                builder.addQueryParameter("q", query.trim().take(100))
             }
             if (httpUrl.queryParameter("extended") == null) builder.addQueryParameter("extended", "1")
-            if (httpUrl.queryParameter("limit") == null) builder.addQueryParameter("limit", "100")
+            if (httpUrl.queryParameter("limit") == null) {
+                builder.addQueryParameter("limit", source.limit.toString())
+            }
 
             val built = builder.build()
             AppLog.info("Tracker", "${source.label} : recherche « $query » → ${AppLog.redact(built.toString())}")

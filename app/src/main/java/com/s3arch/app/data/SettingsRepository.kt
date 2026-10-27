@@ -29,15 +29,26 @@ class SettingsRepository(private val context: Context) {
             tr4kerUrl = prefs[URL_TR4KER] ?: Tracker.TR4KER.defaultUrl,
             v3xKey = prefs[KEY_V3X] ?: "",
             v3xUrl = prefs[URL_V3X] ?: Tracker.V3X.defaultUrl,
+            astraTorrentKey = prefs[KEY_ASTRA] ?: "",
+            astraTorrentUrl = prefs[URL_ASTRA] ?: Tracker.ASTRATORRENT.defaultUrl,
+            yggRebornKey = prefs[KEY_YGG] ?: "",
+            yggRebornUrl = prefs[URL_YGG] ?: Tracker.YGG_REBORN.defaultUrl,
             enabledTrackers = prefs[ENABLED] ?: Tracker.entries.map { it.id }.toSet(),
             customTrackers = decodeCustom(prefs[CUSTOM]),
             freeboxHost = prefs[FB_HOST] ?: "mafreebox.freebox.fr",
             freeboxApiBase = prefs[FB_BASE] ?: "/api/v8",
             freeboxApiVersion = prefs[FB_VERSION] ?: "8",
             freeboxAppToken = prefs[FB_TOKEN] ?: "",
-            freeboxDownloadDir = prefs[FB_DIR] ?: "/Disque dur/S3ARCH",
+            // Migration : l'ancien chemin (« /Disque dur/S3ARCH ») ne correspondait pas
+            // au dossier affiche. On le remplace par le dossier standard de la Freebox.
+            freeboxDownloadDir = prefs[FB_DIR]
+                ?.trim()
+                ?.takeUnless { it.trimEnd('/') == FreeboxPaths.LEGACY_DEFAULT_DIR }
+                ?: FreeboxPaths.DEFAULT_DIR,
             onboardingDone = prefs[ONBOARDING] ?: false,
             dynamicColor = prefs[DYNAMIC_COLOR] ?: true,
+            accentColor = prefs[ACCENT_COLOR] ?: "azure",
+            ignoredUpdateVersion = prefs[IGNORED_UPDATE] ?: "",
             sortMode = SortMode.fromId(prefs[SORT_MODE]),
             enabledTypes = prefs[TYPES] ?: emptySet(),
             vpnEnabled = prefs[VPN_ENABLED] ?: false,
@@ -50,13 +61,25 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun saveApiKeys(keys: Map<Tracker, String>, urls: Map<Tracker, String>) {
         context.dataStore.edit { prefs ->
-            keys[Tracker.C411]?.let { prefs[KEY_C411] = it.trim() }
-            keys[Tracker.TR4KER]?.let { prefs[KEY_TR4KER] = it.trim() }
-            keys[Tracker.V3X]?.let { prefs[KEY_V3X] = it.trim() }
-            urls[Tracker.C411]?.let { prefs[URL_C411] = it.trim() }
-            urls[Tracker.TR4KER]?.let { prefs[URL_TR4KER] = it.trim() }
-            urls[Tracker.V3X]?.let { prefs[URL_V3X] = it.trim() }
+            keys.forEach { (tracker, value) -> prefs[keyPreference(tracker)] = value.trim() }
+            urls.forEach { (tracker, value) -> prefs[urlPreference(tracker)] = value.trim() }
         }
+    }
+
+    private fun keyPreference(tracker: Tracker) = when (tracker) {
+        Tracker.C411 -> KEY_C411
+        Tracker.TR4KER -> KEY_TR4KER
+        Tracker.V3X -> KEY_V3X
+        Tracker.ASTRATORRENT -> KEY_ASTRA
+        Tracker.YGG_REBORN -> KEY_YGG
+    }
+
+    private fun urlPreference(tracker: Tracker) = when (tracker) {
+        Tracker.C411 -> URL_C411
+        Tracker.TR4KER -> URL_TR4KER
+        Tracker.V3X -> URL_V3X
+        Tracker.ASTRATORRENT -> URL_ASTRA
+        Tracker.YGG_REBORN -> URL_YGG
     }
 
     suspend fun setEnabledTrackers(ids: Set<String>) {
@@ -101,6 +124,15 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setDynamicColor(enabled: Boolean) {
         context.dataStore.edit { it[DYNAMIC_COLOR] = enabled }
+    }
+
+    suspend fun setAccentColor(id: String) {
+        context.dataStore.edit { it[ACCENT_COLOR] = id }
+    }
+
+    /** Mise a jour ignoree : le bandeau ne revient plus pour cette version. */
+    suspend fun setIgnoredUpdateVersion(version: String) {
+        context.dataStore.edit { it[IGNORED_UPDATE] = version.trim() }
     }
 
     suspend fun setSortMode(mode: SortMode) {
@@ -186,9 +218,13 @@ class SettingsRepository(private val context: Context) {
         val KEY_C411 = stringPreferencesKey("c411_key")
         val KEY_TR4KER = stringPreferencesKey("tr4ker_key")
         val KEY_V3X = stringPreferencesKey("v3x_key")
+        val KEY_ASTRA = stringPreferencesKey("astratorrent_key")
+        val KEY_YGG = stringPreferencesKey("yggreborn_key")
         val URL_C411 = stringPreferencesKey("c411_url")
         val URL_TR4KER = stringPreferencesKey("tr4ker_url")
         val URL_V3X = stringPreferencesKey("v3x_url")
+        val URL_ASTRA = stringPreferencesKey("astratorrent_url")
+        val URL_YGG = stringPreferencesKey("yggreborn_url")
         val ENABLED = stringSetPreferencesKey("enabled_trackers")
         val CUSTOM = stringPreferencesKey("custom_trackers")
         val FB_HOST = stringPreferencesKey("freebox_host")
@@ -198,6 +234,8 @@ class SettingsRepository(private val context: Context) {
         val FB_DIR = stringPreferencesKey("freebox_download_dir")
         val ONBOARDING = booleanPreferencesKey("onboarding_done")
         val DYNAMIC_COLOR = booleanPreferencesKey("dynamic_color")
+        val ACCENT_COLOR = stringPreferencesKey("accent_color")
+        val IGNORED_UPDATE = stringPreferencesKey("ignored_update_version")
         val SORT_MODE = stringPreferencesKey("sort_mode")
         val TYPES = stringSetPreferencesKey("enabled_types")
         val VPN_ENABLED = booleanPreferencesKey("vpn_enabled")

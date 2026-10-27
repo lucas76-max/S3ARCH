@@ -1,17 +1,20 @@
 # S3ARCH
 
-**Version 1.2.0**
+**Version 1.3.0**
 
-Application Android **Material 3 Expressive** (avec **Material You** : couleurs dynamiques issues du
-fond d'écran sur Android 12+) pour chercher un contenu sur plusieurs trackers torrent
-(C411, TR4KER, V3X et tout endpoint Torznab tiers), lancer le téléchargement directement sur la
-**Freebox** via l'API officielle Freebox OS, suivre la progression en temps réel et lire le fichier
-dans un **lecteur intégré** (Media3/ExoPlayer) ou avec **VLC**.
+Application Android **Material You** (couleurs dynamiques issues du fond d'écran sur Android 12+,
+ou palette d'accent personnalisée quand elles sont désactivées) pour chercher un contenu sur
+plusieurs trackers torrent (C411, TR4KER, V3X, AstraTorrent, YGG Reborn et tout endpoint Torznab
+tiers), lancer le téléchargement directement sur la **Freebox** via l'API officielle Freebox OS,
+suivre la progression en temps réel et lire le fichier dans un **lecteur intégré**
+(Media3/ExoPlayer) ou avec **VLC**.
 
 ## Fonctionnalités
 
-- **Recherche multi-trackers** : C411, TR4KER et V3X (protocole Torznab), requêtes en parallèle,
-  fusion des résultats.
+- **Choix des trackers au premier lancement** : les logos et les noms de C411, TR4KER, V3X,
+  AstraTorrent et YGG Reborn sont affichés ; un appui active ou désactive chaque tracker.
+- **Recherche multi-trackers** : C411, TR4KER, V3X, AstraTorrent et YGG Reborn (protocole Torznab),
+  requêtes en parallèle, fusion des résultats.
 - **Trackers tiers** : ajout d'un endpoint Torznab personnalisé, avec avertissement explicite que
   la compatibilité n'est **pas garantie**.
 - **Tri au choix** : taille croissante (par défaut), taille décroissante, seeders décroissants,
@@ -20,13 +23,16 @@ dans un **lecteur intégré** (Media3/ExoPlayer) ou avec **VLC**.
 - **Filtre facultatif par type de contenu** (Réglages → Types de contenus) : Films, Séries,
   Musique, Ebooks, Applications, Jeux, XXX, Autres. Aucun type coché = tous les résultats ; le
   nombre de résultats masqués est indiqué sous la barre de recherche.
-- **Transferts détaillés** : nombre de seeders du torrent et débit courant en **Mbps**, en plus du
-  pourcentage, du volume et du temps restant.
+- **Transferts détaillés** : nombre de seeders, débit courant en **Mbps**, pourcentage, volume et
+  temps restant, avec une barre de progression animée en vague Material.
+- **Mise à jour intégrée** : au lancement, S3ARCH interroge les releases GitHub. Un bandeau
+  « Mise à jour disponible. » propose **Ignorer** (ne revient plus pour cette version) ou
+  **Ouvrir** (changelog + **Mettre à jour**, téléchargement de l'APK et installation).
 - **Clés API demandées au premier démarrage** puis enregistrées localement (modifiables
   dans les réglages, avec test de connexion par tracker).
 - **Connexion Freebox au premier démarrage** : découverte de l'API, autorisation officielle
   (appui sur la flèche → du boîtier), session HMAC-SHA1, puis création automatique du
-  dossier `/Disque dur/S3ARCH`.
+  dossier `/Disque dur/Téléchargements/S3ARCH` (l'ancien chemin `/Disque dur/S3ARCH` est migré).
 - **Téléchargement en un bouton, en deux temps** : le téléphone récupère le `.torrent` et
   l'envoie **en fichier** à la Freebox, qui crée une vraie tâche BitTorrent ; à défaut, le lien
   magnet est utilisé. L'app vérifie ensuite que la tâche créée est bien de type `bt`.
@@ -42,17 +48,17 @@ dans un **lecteur intégré** (Media3/ExoPlayer) ou avec **VLC**.
 - **Lecture** : lecteur intégré (Media3/ExoPlayer) via « Lire dans S3ARCH », ou VLC. S3ARCH lit
   la liste des fichiers de la tâche (`GET /downloads/{id}/files`), garde le plus gros média (pas
   le dossier du torrent ni l'échantillon) et le sert par un proxy HTTP local authentifié.
-- **Accès hors du réseau local (VPN WireGuard)** : proposé à la fin de l'appairage et dans les
-  réglages, accepté ou refusé librement. L'app crée elle-même la configuration sur la Freebox,
-  puis bascule automatiquement sur le tunnel quand la box n'est pas joignable en local.
+- **Accès hors du réseau local (VPN WireGuard)** : proposé uniquement dans les réglages, accepté
+  ou refusé librement. L'app crée elle-même la configuration sur la Freebox, puis bascule
+  automatiquement sur le tunnel quand la box n'est pas joignable en local.
 
 ## Écrans
 
 | Écran | Contenu |
 |---|---|
-| Configuration (1er lancement) | Étape 1 : clés API C411 / TR4KER / V3X (+ endpoint Torznab editable). Étape 2 : adresse Freebox + dossier + autorisation. |
+| Configuration (1er lancement) | Étape 1 : choix des trackers (logos). Étape 2 : clés API (+ endpoint Torznab éditable). Étape 3 : adresse Freebox + dossier + autorisation. |
 | Recherche | Barre de recherche, filtres par tracker, sélecteur de tri, résultats filtrés par type, bouton de téléchargement. |
-| Transferts | Cartes de téléchargement avec type de tâche (Torrent / Fichier), progression temps réel, débit, ETA, boutons « Lire dans S3ARCH » / « Lire avec VLC », « Annuler », « Supprimer du disque » et « Masquer de la liste ». |
+| Transferts | Cartes de téléchargement, progression temps réel animée, débit, ETA, boutons « Lire dans S3ARCH » / « Lire avec VLC », « Annuler », « Supprimer du disque » et « Masquer de la liste ». |
 | Réglages | Clés API, trackers tiers Torznab, filtre par types de contenus, dossier Freebox, session/réautorisation, **VPN hors réseau local**, couleurs dynamiques, journaux. |
 
 ## Trackers tiers (Torznab)
@@ -72,6 +78,8 @@ Les clés se récupèrent sur chaque tracker (profil / paramètres → clé API)
 | C411 | `https://c411.org/api` | Profil → Paramètres |
 | TR4KER | `https://tr4ker.net/api/torznab` | Mon compte → Paramètres |
 | V3X | `https://api.v3x.club/torznab` | Réglages → Intégrations / API (scope `torznab`) |
+| AstraTorrent | `https://astratorrent.la/api/torznab.php` | Mon cockpit → Seedbox & *Arr → clé API |
+| YGG Reborn | `https://www.yggreborn.org/api` | En haut du site : API → passkey |
 
 La recherche utilise `?t=search&apikey=…&q=…&limit=100&extended=1`. Si un tracker expose un
 autre chemin, l'URL est modifiable dans l'app (bouton « URL » à côté de chaque clé).
@@ -103,7 +111,7 @@ Trois pièges de cette API, déjà traités :
 
 - `/downloads/add/` **n'accepte pas de corps JSON** (réponse `invalid_request`). Contrairement au
   reste de l'API, ce endpoint attend un corps `application/x-www-form-urlencoded`.
-- `download_dir` doit **finir par `/`** : `/Disque dur/S3ARCH/`.
+- `download_dir` doit **finir par `/`** : `/Disque dur/Téléchargements/S3ARCH/`.
 - `parent` de `/fs/mkdir/` doit au contraire **ne pas** finir par `/` :
   `b64("/Disque dur")`, pas `b64("/Disque dur/")`. Avec le slash, la Freebox répond
   `path_not_found`, le dossier n'est jamais créé, et le téléchargement accepté échoue ensuite
@@ -190,21 +198,31 @@ chaque requête servie par le proxy.
 
 ## Accès hors du réseau local (VPN)
 
-Hors du Wi-Fi de la maison, `mafreebox.freebox.fr` ne répond plus : l'application propose donc de
-créer un **serveur WireGuard** sur la Freebox. La proposition apparaît une seule fois, à la fin de
-l'appairage (et reste disponible dans les réglages), avec une explication et deux choix :
-**Créer le VPN** ou **Pas maintenant**. Un refus n'est pas définitif : le bouton reste dans les
-réglages.
+Hors du Wi-Fi de la maison, `mafreebox.freebox.fr` ne répond plus : l'application peut créer un
+**serveur WireGuard** sur la Freebox. Cette option n'apparaît plus au premier démarrage : elle est
+disponible dans **Réglages → Accès hors du réseau local**, avec une explication et deux choix :
+**Créer le VPN** ou **Désactiver le VPN**. Un refus n'est pas définitif.
 
 Côté Freebox, tout est automatisé (API officielle, section `vpn`) :
 
 | Étape | Appel |
 |---|---|
 | Trouver le serveur | `GET /vpn/` → entrée de type `wireguard` |
-| L'activer | `PUT /vpn/wireguard/config/` avec `{"enabled": true}` (sauté s'il tourne déjà) |
-| Choisir une adresse | `GET /vpn/ip_pool/` → première IPv4 libre entre `ip_start` et `ip_end` |
-| Créer l'utilisateur | `POST /vpn/user/` `{login: "s3arch", type: "wireguard", ip_reservation: …}` |
+| L'activer | `PUT /vpn/wireguard/config/` avec `{"enabled": true}` (sauté s'il tourne déjà), puis attente de l'état `started` |
+| Choisir une adresse | `GET /vpn/ip_pool/` → IPv4 libres entre `ip_start` et `ip_end` (3 candidates au cas où la box en refuse une) |
+| Créer l'utilisateur | `POST /vpn/user/` `{login: "s3arch", type: "wireguard", ip_reservation, conf_wireguard}` |
 | Récupérer la config | `GET /vpn/download_config/wireguard/s3arch/plain` (wg-quick) |
+
+**Pourquoi `type` et `ip_reservation` sont obligatoires.** L'objet `VPNUser` de Freebox OS
+distingue `standard` et `wireguard` ; pour ce dernier, `ip_reservation` est requis et doit
+appartenir au pool VPN. Les premières versions de S3ARCH envoyaient `type` sans mot de passe, ou
+omettaient `ip_reservation` : la box répondait alors `internal_error` (« Impossible de créer cet
+objet »). L'app envoie désormais le payload documenté (avec `conf_wireguard`), réessaie avec un mot
+de passe de secours si le firmware l'exige, puis sur une autre adresse du pool. Elle attend aussi
+que le serveur WireGuard soit passé à l'état `started` : une création pendant `starting` est
+refusée de la même façon. Enfin, un `internal_error` peut survenir après une création réussie :
+l'app relit la liste `/vpn/user/` avant de conclure à un échec, et le journal indique l'adresse et
+la variante essayées.
 
 La configuration obtenue (clé privée, clé publique du serveur, endpoint, DNS, MTU) est conservée
 sur l'appareil, et le tunnel est monté par la bibliothèque officielle
@@ -243,6 +261,7 @@ l'application.
 ## Stack technique
 
 - Kotlin 2.0.21, Jetpack Compose (BOM 2024.12.01), Material 3, Navigation Compose
+- Coil 2.7 (+ support SVG) pour les logos des trackers
 - DataStore Preferences pour les clés/réglages et la liste des transferts
 - OkHttp 4.12 pour les appels trackers et Freebox
 - Media3 (ExoPlayer) 1.5.1 pour le lecteur vidéo intégré

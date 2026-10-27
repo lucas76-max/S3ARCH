@@ -34,7 +34,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
@@ -59,6 +58,7 @@ import com.s3arch.app.ui.UiState
 import com.s3arch.app.ui.components.EmptyState
 import com.s3arch.app.ui.components.Pill
 import com.s3arch.app.ui.components.ScreenHeader
+import com.s3arch.app.ui.components.WaveProgress
 import com.s3arch.app.ui.components.scaleOnPress
 import com.s3arch.app.util.formatBytes
 import com.s3arch.app.util.formatEta
@@ -253,16 +253,6 @@ private fun DownloadCard(
                         modifier = Modifier.horizontalScroll(rememberScrollState()),
                     ) {
                         Pill(download.tracker, tint = MaterialTheme.colorScheme.secondary)
-                        if (task != null && task.type.isNotBlank()) {
-                            Pill(
-                                text = if (task.type == "bt") "Torrent" else "Fichier ${task.type}",
-                                tint = if (task.type == "bt") {
-                                    MaterialTheme.colorScheme.primary
-                                } else {
-                                    MaterialTheme.colorScheme.error
-                                },
-                            )
-                        }
                         Pill(
                             text = when {
                                 task == null -> "Synchronisation"
@@ -288,15 +278,17 @@ private fun DownloadCard(
             Spacer(Modifier.height(16.dp))
 
             if (task == null) {
-                LinearProgressIndicator(
+                WaveProgress(
+                    progress = null,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(8.dp),
                     color = MaterialTheme.colorScheme.primary,
+                    trackColor = MaterialTheme.colorScheme.surfaceVariant,
                 )
             } else {
-                LinearProgressIndicator(
-                    progress = { progress },
+                WaveProgress(
+                    progress = progress,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(8.dp),

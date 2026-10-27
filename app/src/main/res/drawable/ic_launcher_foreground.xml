@@ -4,23 +4,33 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
+
+    <!-- Loupe -->
     <path
-        android:pathData="M49,30 m-16,0 a16,16 0 1,0 32,0 a16,16 0 1,0 -32,0"
-        android:strokeWidth="6"
-        android:strokeColor="#5AC8FA" />
+        android:pathData="M50,44 m-17,0 a17,17 0 1,0 34,0 a17,17 0 1,0 -34,0"
+        android:fillColor="#00000000"
+        android:strokeColor="#7FD8FF"
+        android:strokeWidth="6" />
     <path
-        android:pathData="M60,42 L71,53"
-        android:strokeWidth="6"
-        android:strokeLineCap="round"
-        android:strokeColor="#5AC8FA" />
+        android:pathData="M62.5,56.5 L73,67"
+        android:strokeColor="#7FD8FF"
+        android:strokeWidth="7"
+        android:strokeLineCap="round" />
+
+    <!-- Lecture -->
     <path
-        android:pathData="M38,78 L70,78"
+        android:pathData="M45,36 L57,44 L45,52 Z"
+        android:fillColor="#EAF6FF" />
+
+    <!-- Archives -->
+    <path
+        android:pathData="M31,77 L77,77"
+        android:strokeColor="#B9A8FF"
         android:strokeWidth="5"
-        android:strokeLineCap="round"
-        android:strokeColor="#8B7CFF" />
+        android:strokeLineCap="round" />
     <path
-        android:pathData="M38,66 L70,66"
+        android:pathData="M40,86 L68,86"
+        android:strokeColor="#8B7CFF"
         android:strokeWidth="5"
-        android:strokeLineCap="round"
-        android:strokeColor="#8B7CFF" />
+        android:strokeLineCap="round" />
 </vector>

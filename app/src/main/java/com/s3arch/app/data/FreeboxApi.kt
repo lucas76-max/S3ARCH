@@ -3,6 +3,7 @@ package com.s3arch.app.data
 import android.util.Base64
 import com.s3arch.app.BuildConfig
 import com.s3arch.app.data.vpn.VpnAddresses
+import com.s3arch.app.data.vpn.VpnUserRequests
 import com.s3arch.app.util.AppLog
 import com.s3arch.app.util.DownloadUrls
 import kotlinx.coroutines.Dispatchers
@@ -291,7 +292,7 @@ class FreeboxApi {
      * (toujours termine par un « / », comme l'exige `download_dir`).
      *
      * Attention : `/fs/mkdir/` attend un parent **sans** slash final (« /Disque dur »),
-     * alors que `download_dir` en exige un (« /Disque dur/S3ARCH/ »). Mettre le slash
+     * alors que `download_dir` en exige un (« /Disque dur/Téléchargements/S3ARCH/ »). Mettre le slash
      * dans le parent fait echouer la creation (`path_not_found`), puis le telechargement
      * echoue en `bt_file_error` faute de dossier.
      */
@@ -653,7 +654,9 @@ class FreeboxApi {
         val result = authCall("/vpn/", "GET", null)
         (result as? JsonArray)?.mapNotNull { element ->
             val obj = element as? JsonObject ?: return@mapNotNull null
-            val id = obj["name"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+            val id = obj["name"]?.jsonPrimitive?.contentOrNull
+                ?: obj["id"]?.jsonPrimitive?.contentOrNull
+                ?: return@mapNotNull null
             VpnServer(
                 id = id,
                 type = obj["type"]?.jsonPrimitive?.contentOrNull ?: "",
@@ -662,11 +665,42 @@ class FreeboxApi {
         } ?: emptyList()
     }
 
+    /**
+     * Attend que le serveur WireGuard soit reellement demarre.
+     *
+     * La box active le serveur de facon asynchrone : creer un utilisateur pendant
+     * l'etat `starting` peut etre refuse par un `internal_error` generique. On laisse
+     * donc au serveur le temps de passer a `started` avant l'appel.
+     */
+    suspend fun awaitVpnServerStarted(id: String, timeoutMs: Long = 12_000): Boolean =
+        withContext(Dispatchers.IO) {
+            val deadline = System.currentTimeMillis() + timeoutMs
+            while (System.currentTimeMillis() < deadline) {
+                val state = runCatching {
+                    vpnServers().firstOrNull { it.id == id }?.state
+                }.getOrNull()
+                if (state == "started") {
+                    AppLog.info("VPN", "Serveur WireGuard « $id » démarré")
+                    return@withContext true
+                }
+                delay(600)
+            }
+            false
+        }
+
     /** Active le serveur WireGuard (idempotent). */
     suspend fun enableWireGuardServer(id: String): Unit = withContext(Dispatchers.IO) {
         ensureSession()
-        authCall("/vpn/$id/config/", "PUT", buildJsonObject { put("enabled", true) })
-        AppLog.info("VPN", "Serveur WireGuard « $id » activé")
+        AppLog.info("VPN", "PUT /vpn/$id/config/ enabled=true")
+        runCatching { authCall("/vpn/$id/config/", "PUT", buildJsonObject { put("enabled", true) }) }
+            .onSuccess { AppLog.info("VPN", "Serveur WireGuard « $id » activé") }
+            .onFailure { error ->
+                AppLog.error("VPN", "Activation du serveur « $id » refusée : ${error.message}")
+                throw FreeboxException(
+                    "Activation du serveur WireGuard refusée : ${error.message}",
+                    (error as? FreeboxException)?.code,
+                )
+            }
     }
 
     /** Plage d'adresses du pool VPN et reservations existantes. */
@@ -683,39 +717,118 @@ class FreeboxApi {
         )
     }
 
-    /** Cree l'utilisateur WireGuard dedie a l'application s'il n'existe pas deja. */
+    /**
+     * Cree l'utilisateur WireGuard dedie a l'application s'il n'existe pas deja.
+     *
+     * Le payload suit l'objet `VPNUser` documente par Freebox OS :
+     * `login`, `type: "wireguard"` et `ip_reservation` (obligatoire pour ce type),
+     * avec `conf_wireguard` pour le keepalive. Les tous premiers essais de S3ARCH
+     * omettaient `type`/`ip_reservation`, ou envoyaient `type` sans mot de passe : la
+     * box repondait alors `internal_error` (« Impossible de creer cet objet »).
+     *
+     * Comme certaines versions de firmware sont plus strictes, plusieurs variantes
+     * documentees sont essayees, puis une autre adresse du pool si besoin. Un
+     * `internal_error` peut aussi survenir apres une creation reussie : la liste des
+     * utilisateurs est donc relue avant de conclure a un echec.
+     */
     suspend fun ensureWireGuardUser(login: String): String = withContext(Dispatchers.IO) {
         ensureSession()
-        val users = authCall("/vpn/user/", "GET", null) as? JsonArray
-        val existing = users?.mapNotNull { element ->
-            (element as? JsonObject)?.get("login")?.jsonPrimitive?.contentOrNull
-        }.orEmpty()
-        if (login in existing) return@withContext login
+        if (vpnUsers().contains(login)) {
+            AppLog.info("VPN", "Utilisateur WireGuard « $login » déjà présent")
+            return@withContext login
+        }
 
-        val pool = vpnPool()
-        val ip = VpnAddresses.nextFreeIp(pool.start, pool.end, pool.reserved)
-            ?: throw FreeboxException("Aucune adresse VPN libre sur la Freebox")
-        authCall(
-            "/vpn/user/",
-            "POST",
-            buildJsonObject {
-                put("login", login)
-                put("type", "wireguard")
-                put("ip_reservation", ip)
-            },
+        val pool = runCatching { vpnPool() }.getOrNull()
+        val candidates = pool?.let {
+            VpnAddresses.freeIps(it.start, it.end, it.reserved, limit = 3)
+        }.orEmpty()
+        if (candidates.isEmpty()) {
+            throw FreeboxException(
+                "Aucune adresse VPN libre sur la Freebox : supprimez un utilisateur VPN " +
+                    "dans Freebox OS, puis réessayez",
+                "no_free_ip",
+            )
+        }
+
+        val password = randomSecret(24)
+        var lastError: Throwable? = null
+
+        for (ip in candidates) {
+            val payloads = VpnUserRequests.payloads(login, password, ip)
+            payloads.forEachIndexed { index, payload ->
+                AppLog.info(
+                    "VPN",
+                    "POST /vpn/user/ (type=wireguard, ip=$ip, variante ${index + 1}/${payloads.size})",
+                )
+                lastError = runCatching { authCall("/vpn/user/", "POST", payload) }.exceptionOrNull()
+                if (lastError == null) {
+                    AppLog.info("VPN", "Utilisateur WireGuard « $login » créé (ip=$ip)")
+                    return@withContext login
+                }
+                AppLog.error(
+                    "VPN",
+                    "Création refusée (ip=$ip, variante ${index + 1}) : ${lastError?.message}",
+                )
+                // La box a pu creer l'utilisateur malgre la reponse d'erreur.
+                if (vpnUsers().contains(login)) {
+                    AppLog.warn("VPN", "Utilisateur VPN finalement présent après l'erreur : poursuite")
+                    return@withContext login
+                }
+            }
+        }
+
+        val detail = lastError?.message ?: "erreur inconnue"
+        throw FreeboxException(
+            "Création de l'utilisateur VPN refusée par la Freebox ($detail). " +
+                "Vérifiez que le serveur WireGuard est bien activé dans Freebox OS " +
+                "(Paramètres de la Freebox → mode avancé → Serveur VPN), puis réessayez.",
+            (lastError as? FreeboxException)?.code,
         )
-        AppLog.info("VPN", "Utilisateur WireGuard « $login » créé ($ip)")
-        login
     }
 
-    /** Telecharge la configuration wg-quick du client WireGuard (format `plain`). */
+    /** Logins des utilisateurs VPN existants (vide si la box ne repond pas). */
+    private suspend fun vpnUsers(): Set<String> {
+        val users = runCatching { authCall("/vpn/user/", "GET", null) }.getOrNull() as? JsonArray
+        return users.orEmpty().mapNotNull { element ->
+            (element as? JsonObject)?.get("login")?.jsonPrimitive?.contentOrNull
+        }.toSet()
+    }
+
+    /** Mot de passe aleatoire (8 a 32 caracteres, exigence de la Freebox). */
+    private fun randomSecret(length: Int): String {
+        val alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789"
+        val random = java.security.SecureRandom()
+        return buildString(length) {
+            repeat(length) { append(alphabet[random.nextInt(alphabet.length)]) }
+        }
+    }
+
+    /**
+     * Telecharge la configuration wg-quick du client WireGuard.
+     *
+     * L'endpoint documente ne prend pas de suffixe (`/vpn/download_config/{serveur}/{login}`) ;
+     * certaines versions exposent en plus un format explicite (`/plain`). Les deux sont
+     * essayes : le premier qui renvoie un vrai fichier `[Interface]` gagne.
+     */
     suspend fun wireGuardConfig(serverId: String, login: String): String = withContext(Dispatchers.IO) {
         ensureSession()
-        val text = authText("/vpn/download_config/$serverId/$login/plain")
-        if (!text.contains("[Interface]", ignoreCase = true)) {
-            throw FreeboxException("Configuration WireGuard inattendue : ${text.take(120)}")
+        // Le format est obligatoire dans l'API documentee : `plain` d'abord, puis
+        // l'ancienne forme sans suffixe pour les firmwares qui la toleraient.
+        val candidates = listOf(
+            "/vpn/download_config/$serverId/$login/plain",
+            "/vpn/download_config/$serverId/$login",
+        )
+        val failures = mutableListOf<String>()
+        for (path in candidates) {
+            AppLog.info("VPN", "GET $path")
+            val text = runCatching { authText(path) }.getOrElse { error ->
+                failures += "$path : ${error.message}"
+                null
+            } ?: continue
+            if (text.contains("[Interface]", ignoreCase = true)) return@withContext text
+            failures += "$path : réponse inattendue (${text.take(80)})"
         }
-        text
+        throw FreeboxException("Configuration WireGuard indisponible : ${failures.joinToString(" ; ")}")
     }
 
     /** GET authentifie qui renvoie du texte brut (fichiers de configuration). */
@@ -938,7 +1051,7 @@ class FreeboxApi {
         const val APP_ID = "com.s3arch.app"
         const val APP_NAME = "S3ARCH"
         val APP_VERSION: String = BuildConfig.VERSION_NAME
-        const val DEFAULT_DIR = "/Disque dur/S3ARCH"
+        const val DEFAULT_DIR = FreeboxPaths.DEFAULT_DIR
 
         /**
          * Droits demandes a la Freebox lors de l'appairage.

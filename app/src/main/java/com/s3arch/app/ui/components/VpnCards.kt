@@ -38,57 +38,6 @@ private const val VPN_EXPLANATION =
         "vous soyez. Rien n'est modifié sans votre accord, et vous pouvez désactiver le VPN " +
         "à tout moment."
 
-/** Proposition affichee a la fin de l'appairage de la Freebox. */
-@Composable
-fun VpnProposalCard(
-    enabled: Boolean,
-    busy: Boolean,
-    onEnable: () -> Unit,
-    onDecline: () -> Unit,
-) {
-    SectionCard(
-        title = "Utiliser S3ARCH hors de chez vous",
-        subtitle = "Recommandé : un VPN créé sur votre Freebox, sans réglage manuel.",
-    ) {
-        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            Text(
-                VPN_EXPLANATION,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Button(
-                onClick = onEnable,
-                enabled = enabled && !busy,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(56.dp),
-                shape = RoundedCornerShape(50),
-            ) {
-                if (busy) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(18.dp),
-                        strokeWidth = 2.dp,
-                        color = MaterialTheme.colorScheme.onPrimary,
-                    )
-                    Spacer(Modifier.size(10.dp))
-                    Text("Création du VPN…", style = MaterialTheme.typography.labelLarge)
-                } else {
-                    Icon(Icons.Rounded.Public, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.size(8.dp))
-                    Text("Créer le VPN", style = MaterialTheme.typography.labelLarge)
-                }
-            }
-            TextButton(onClick = onDecline, modifier = Modifier.fillMaxWidth()) {
-                Text(
-                    "Pas maintenant",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-    }
-}
-
 /**
  * Carte affichee quand la Freebox n'accorde pas le droit « Paramètres ».
  *

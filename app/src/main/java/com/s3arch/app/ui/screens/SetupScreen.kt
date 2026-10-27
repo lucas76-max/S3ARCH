@@ -7,7 +7,9 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,6 +29,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.Router
@@ -51,26 +54,28 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.s3arch.app.data.FreeboxPaths
 import com.s3arch.app.data.Tracker
 import com.s3arch.app.data.TrackerSource
 import com.s3arch.app.ui.FreeboxStatus
 import com.s3arch.app.ui.S3archViewModel
 import com.s3arch.app.ui.UiState
 import com.s3arch.app.ui.components.AddTrackerDialog
-import com.s3arch.app.ui.components.FreeboxRightsCard
 import com.s3arch.app.ui.components.LogoMark
 import com.s3arch.app.ui.components.SectionCard
-import com.s3arch.app.ui.components.VpnProposalCard
 import com.s3arch.app.ui.components.TrackerKeyEditor
-import com.s3arch.app.ui.components.openFreeboxOs
+import com.s3arch.app.ui.components.TrackerLogo
 import com.s3arch.app.ui.components.scaleOnPress
-import androidx.compose.foundation.interaction.MutableInteractionSource
 
 /**
- * Premier demarrage : cles API puis connexion Freebox (autorisation officielle).
+ * Premier demarrage : choix des trackers (logos), cles API, puis connexion Freebox.
+ *
+ * Le VPN n'est volontairement plus propose ici : il reste disponible dans les reglages
+ * pour ceux qui en ont besoin.
  */
 @Composable
 fun SetupScreen(
@@ -80,24 +85,45 @@ fun SetupScreen(
     onFinish: () -> Unit,
 ) {
     var step by rememberSaveable { mutableStateOf(0) }
+    var selectedTrackers by remember { mutableStateOf(state.settings.enabledTrackers) }
     var c411Key by rememberSaveable { mutableStateOf(state.settings.c411Key) }
     var c411Url by rememberSaveable { mutableStateOf(state.settings.c411Url) }
     var tr4kerKey by rememberSaveable { mutableStateOf(state.settings.tr4kerKey) }
     var tr4kerUrl by rememberSaveable { mutableStateOf(state.settings.tr4kerUrl) }
     var v3xKey by rememberSaveable { mutableStateOf(state.settings.v3xKey) }
     var v3xUrl by rememberSaveable { mutableStateOf(state.settings.v3xUrl) }
+    var astraKey by rememberSaveable { mutableStateOf(state.settings.astraTorrentKey) }
+    var astraUrl by rememberSaveable { mutableStateOf(state.settings.astraTorrentUrl) }
+    var yggKey by rememberSaveable { mutableStateOf(state.settings.yggRebornKey) }
+    var yggUrl by rememberSaveable { mutableStateOf(state.settings.yggRebornUrl) }
     var host by rememberSaveable { mutableStateOf(state.settings.freeboxHost) }
     var folder by rememberSaveable { mutableStateOf(state.settings.freeboxDownloadDir) }
     var showAddTracker by remember { mutableStateOf(false) }
-    val context = LocalContext.current
 
-    val hasKey = listOf(c411Key, tr4kerKey, v3xKey).any { it.isNotBlank() } ||
+    fun keyOf(tracker: Tracker): String = when (tracker) {
+        Tracker.C411 -> c411Key
+        Tracker.TR4KER -> tr4kerKey
+        Tracker.V3X -> v3xKey
+        Tracker.ASTRATORRENT -> astraKey
+        Tracker.YGG_REBORN -> yggKey
+    }
+
+    fun urlOf(tracker: Tracker): String = when (tracker) {
+        Tracker.C411 -> c411Url
+        Tracker.TR4KER -> tr4kerUrl
+        Tracker.V3X -> v3xUrl
+        Tracker.ASTRATORRENT -> astraUrl
+        Tracker.YGG_REBORN -> yggUrl
+    }
+
+    val chosen = Tracker.entries.filter { it.id in selectedTrackers }
+    val hasKey = chosen.any { keyOf(it).isNotBlank() } ||
         state.settings.customTrackers.any { it.key.isNotBlank() }
     val connected = state.setup.status == FreeboxStatus.Connected
     val busy = state.setup.status == FreeboxStatus.Connecting ||
         state.setup.status == FreeboxStatus.WaitingApproval
     val progress by animateFloatAsState(
-        targetValue = if (step == 0) 0.5f else 1f,
+        targetValue = step / 2f,
         animationSpec = spring(),
         label = "setup-progress",
     )
@@ -108,13 +134,18 @@ fun SetupScreen(
                 Tracker.C411 to c411Key,
                 Tracker.TR4KER to tr4kerKey,
                 Tracker.V3X to v3xKey,
+                Tracker.ASTRATORRENT to astraKey,
+                Tracker.YGG_REBORN to yggKey,
             ),
             mapOf(
                 Tracker.C411 to c411Url,
                 Tracker.TR4KER to tr4kerUrl,
                 Tracker.V3X to v3xUrl,
+                Tracker.ASTRATORRENT to astraUrl,
+                Tracker.YGG_REBORN to yggUrl,
             ),
         )
+        vm.setEnabledTrackers(selectedTrackers)
     }
 
     if (showAddTracker) {
@@ -144,16 +175,17 @@ fun SetupScreen(
                     Column {
                         Text("S3ARCH", style = MaterialTheme.typography.displaySmall)
                         Text(
-                            "Recherche · Freebox · VLC",
+                            "Recherche · Freebox · lecteur intégré",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 }
                 Spacer(Modifier.height(20.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    StepPill(index = 1, label = "Clés API", active = step == 0)
-                    StepPill(index = 2, label = "Freebox", active = step == 1)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    StepPill(index = 1, label = "Trackers", active = step == 0)
+                    StepPill(index = 2, label = "Clés API", active = step == 1)
+                    StepPill(index = 3, label = "Freebox", active = step == 2)
                 }
                 Spacer(Modifier.height(12.dp))
                 LinearProgressIndicator(
@@ -182,172 +214,186 @@ fun SetupScreen(
                         .padding(horizontal = 20.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
-                    if (currentStep == 0) {
-                        SectionCard(
-                            title = "Vos clés API",
-                            subtitle = "S3ARCH interroge C411, TR4KER et V3X. Les clés restent sur cet appareil.",
-                        ) {
-                            Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
-                                TrackerKeyEditor(
-                                    tracker = Tracker.C411,
-                                    keyValue = c411Key,
-                                    urlValue = c411Url,
-                                    onKeyChange = { c411Key = it },
-                                    onUrlChange = { c411Url = it },
-                                    onTest = {
-                                        vm.testTracker(
-                                            TrackerSource(
-                                                Tracker.C411.id,
-                                                Tracker.C411.label,
-                                                c411Url,
-                                                c411Key,
-                                                Tracker.C411,
-                                            ),
-                                        )
-                                    },
-                                    testEnabled = !state.searching,
-                                )
-                                TrackerKeyEditor(
-                                    tracker = Tracker.TR4KER,
-                                    keyValue = tr4kerKey,
-                                    urlValue = tr4kerUrl,
-                                    onKeyChange = { tr4kerKey = it },
-                                    onUrlChange = { tr4kerUrl = it },
-                                    onTest = {
-                                        vm.testTracker(
-                                            TrackerSource(
-                                                Tracker.TR4KER.id,
-                                                Tracker.TR4KER.label,
-                                                tr4kerUrl,
-                                                tr4kerKey,
-                                                Tracker.TR4KER,
-                                            ),
-                                        )
-                                    },
-                                    testEnabled = !state.searching,
-                                )
-                                TrackerKeyEditor(
-                                    tracker = Tracker.V3X,
-                                    keyValue = v3xKey,
-                                    urlValue = v3xUrl,
-                                    onKeyChange = { v3xKey = it },
-                                    onUrlChange = { v3xUrl = it },
-                                    onTest = {
-                                        vm.testTracker(
-                                            TrackerSource(
-                                                Tracker.V3X.id,
-                                                Tracker.V3X.label,
-                                                v3xUrl,
-                                                v3xKey,
-                                                Tracker.V3X,
-                                            ),
-                                        )
-                                    },
-                                    testEnabled = !state.searching,
-                                )
-
-                                if (state.settings.customTrackers.isNotEmpty()) {
-                                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        state.settings.customTrackers.forEach { custom ->
-                                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                                Icon(
-                                                    Icons.Rounded.Add,
-                                                    contentDescription = null,
-                                                    tint = MaterialTheme.colorScheme.primary,
-                                                    modifier = Modifier.size(16.dp),
-                                                )
-                                                Spacer(Modifier.size(8.dp))
-                                                Text(
-                                                    "${custom.label} · ${custom.url}",
-                                                    style = MaterialTheme.typography.labelMedium,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    when (currentStep) {
+                        0 -> {
+                            SectionCard(
+                                title = "Vos trackers",
+                                subtitle = "Choisissez ceux que S3ARCH doit interroger. Modifiable à tout moment.",
+                            ) {
+                                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    Tracker.entries.chunked(2).forEach { row ->
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                        ) {
+                                            row.forEach { tracker ->
+                                                TrackerChoice(
+                                                    tracker = tracker,
+                                                    selected = tracker.id in selectedTrackers,
+                                                    onToggle = {
+                                                        selectedTrackers = if (tracker.id in selectedTrackers) {
+                                                            selectedTrackers - tracker.id
+                                                        } else {
+                                                            selectedTrackers + tracker.id
+                                                        }
+                                                    },
+                                                    modifier = Modifier.weight(1f),
                                                 )
                                             }
+                                            if (row.size == 1) Spacer(Modifier.weight(1f))
                                         }
                                     }
                                 }
                             }
-                        }
-
-                        // Ajout d'un tracker tiers : texte discret.
-                        TextButton(onClick = { showAddTracker = true }) {
                             Text(
-                                "Ajouter un tracker Torznab tiers",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                                "Les clés API seront demandées à l'étape suivante pour les trackers " +
+                                    "sélectionnés. Une seule clé suffit pour démarrer.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
 
-                        Text(
-                            "Une seule clé suffit pour démarrer. Vous pourrez compléter plus tard dans les réglages.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    } else {
-                        SectionCard(
-                            title = "Connexion à la Freebox",
-                            subtitle = "API officielle Freebox OS. Un dossier S3ARCH sera créé pour vos téléchargements.",
-                        ) {
-                            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                                OutlinedTextField(
-                                    value = host,
-                                    onValueChange = { host = it },
-                                    label = { Text("Adresse de la Freebox") },
-                                    supportingText = { Text("mafreebox.freebox.fr par défaut") },
-                                    singleLine = true,
-                                    shape = RoundedCornerShape(20.dp),
-                                    modifier = Modifier.fillMaxWidth(),
+                        1 -> {
+                            if (chosen.isEmpty()) {
+                                Text(
+                                    "Aucun tracker sélectionné : revenez à l'étape précédente.",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.error,
                                 )
-                                OutlinedTextField(
-                                    value = folder,
-                                    onValueChange = { folder = it },
-                                    label = { Text("Dossier de téléchargement") },
-                                    supportingText = { Text("/Disque dur/S3ARCH") },
-                                    singleLine = true,
-                                    shape = RoundedCornerShape(20.dp),
-                                    modifier = Modifier.fillMaxWidth(),
-                                )
-                                AnimatedVisibility(visible = state.setup.status != FreeboxStatus.Idle) {
-                                    FreeboxStatusBlock(state)
+                            } else {
+                                SectionCard(
+                                    title = "Vos clés API",
+                                    subtitle = "Les clés restent sur cet appareil.",
+                                ) {
+                                    Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
+                                        chosen.forEach { tracker ->
+                                            TrackerKeyEditor(
+                                                tracker = tracker,
+                                                keyValue = keyOf(tracker),
+                                                urlValue = urlOf(tracker),
+                                                onKeyChange = { value ->
+                                                    when (tracker) {
+                                                        Tracker.C411 -> c411Key = value
+                                                        Tracker.TR4KER -> tr4kerKey = value
+                                                        Tracker.V3X -> v3xKey = value
+                                                        Tracker.ASTRATORRENT -> astraKey = value
+                                                        Tracker.YGG_REBORN -> yggKey = value
+                                                    }
+                                                },
+                                                onUrlChange = { value ->
+                                                    when (tracker) {
+                                                        Tracker.C411 -> c411Url = value
+                                                        Tracker.TR4KER -> tr4kerUrl = value
+                                                        Tracker.V3X -> v3xUrl = value
+                                                        Tracker.ASTRATORRENT -> astraUrl = value
+                                                        Tracker.YGG_REBORN -> yggUrl = value
+                                                    }
+                                                },
+                                                onTest = {
+                                                    vm.testTracker(
+                                                        TrackerSource(
+                                                            tracker.id,
+                                                            tracker.label,
+                                                            urlOf(tracker),
+                                                            keyOf(tracker),
+                                                            tracker,
+                                                        ),
+                                                    )
+                                                },
+                                                testEnabled = !state.searching,
+                                            )
+                                        }
+
+                                        if (state.settings.customTrackers.isNotEmpty()) {
+                                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                                state.settings.customTrackers.forEach { custom ->
+                                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                                        Icon(
+                                                            Icons.Rounded.Add,
+                                                            contentDescription = null,
+                                                            tint = MaterialTheme.colorScheme.primary,
+                                                            modifier = Modifier.size(16.dp),
+                                                        )
+                                                        Spacer(Modifier.size(8.dp))
+                                                        Text(
+                                                            "${custom.label} · ${custom.url}",
+                                                            style = MaterialTheme.typography.labelMedium,
+                                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
-                                ConnectButton(
-                                    label = when {
-                                        connected -> "Autoriser à nouveau"
-                                        busy -> "Connexion en cours…"
-                                        else -> "Connecter la Freebox"
-                                    },
-                                    enabled = !busy && host.isNotBlank(),
-                                    busy = busy,
-                                    onClick = { vm.connectFreebox(host, folder) },
+
+                                TextButton(onClick = { showAddTracker = true }) {
+                                    Text(
+                                        "Ajouter un tracker Torznab tiers",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                                    )
+                                }
+
+                                Text(
+                                    "Une seule clé suffit pour démarrer. Vous pourrez compléter plus tard " +
+                                        "dans les réglages.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                             }
                         }
-                        Text(
-                            "Une fois la demande envoyée, validez sur la Freebox en appuyant sur la flèche → " +
-                                "dans les deux minutes.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
 
-                        // Proposition de VPN : une seule fois, refusable.
-                        if (connected && !state.settings.vpnPromptAnswered &&
-                            state.settings.vpnConfig.isBlank()
-                        ) {
-                            VpnProposalCard(
-                                enabled = !state.needsSettingsRight,
-                                busy = state.vpnBusy,
-                                onEnable = { vm.enableVpn(context) },
-                                onDecline = { vm.dismissVpnPrompt() },
+                        else -> {
+                            SectionCard(
+                                title = "Connexion à la Freebox",
+                                subtitle = "API officielle Freebox OS. Un dossier S3ARCH sera créé pour vos téléchargements.",
+                            ) {
+                                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                                    OutlinedTextField(
+                                        value = host,
+                                        onValueChange = { host = it },
+                                        label = { Text("Adresse de la Freebox") },
+                                        supportingText = { Text("mafreebox.freebox.fr par défaut") },
+                                        singleLine = true,
+                                        shape = RoundedCornerShape(20.dp),
+                                    modifier = Modifier.fillMaxWidth(),
+                                    )
+                                    OutlinedTextField(
+                                        value = folder,
+                                        onValueChange = { folder = it },
+                                        label = { Text("Dossier de téléchargement") },
+                                        supportingText = { Text(FreeboxPaths.DEFAULT_DIR) },
+                                        singleLine = true,
+                                        shape = RoundedCornerShape(20.dp),
+                                        modifier = Modifier.fillMaxWidth(),
+                                    )
+                                    AnimatedVisibility(visible = state.setup.status != FreeboxStatus.Idle) {
+                                        FreeboxStatusBlock(state)
+                                    }
+                                    ConnectButton(
+                                        label = when {
+                                            connected -> "Autoriser à nouveau"
+                                            busy -> "Connexion en cours…"
+                                            else -> "Connecter la Freebox"
+                                        },
+                                        enabled = !busy && host.isNotBlank(),
+                                        busy = busy,
+                                        onClick = { vm.connectFreebox(host, folder) },
+                                    )
+                                }
+                            }
+                            Text(
+                                "Une fois la demande envoyée, validez sur la Freebox en appuyant sur la flèche → " +
+                                    "dans les deux minutes.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
-                        }
-
-                        // La box refuse /vpn/ sans le droit « Paramètres » : on l'explique
-                        // ici, avant meme que l'utilisateur ne tente la creation.
-                        if (connected && state.needsSettingsRight) {
-                            FreeboxRightsCard(
-                                state = state,
-                                onOpenBox = { openFreeboxOs(context, state.settings.freeboxHost) },
-                                onRetry = { vm.retryAfterFreeboxRights(context) },
+                            Text(
+                                "Le VPN hors du réseau local se configure ensuite dans Réglages → " +
+                                    "Accès hors du réseau local.",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
                     }
@@ -367,50 +413,123 @@ fun SetupScreen(
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    if (step == 1) {
-                        TextButton(onClick = { step = 0 }) {
+                    if (step > 0) {
+                        TextButton(onClick = { step -= 1 }) {
                             Icon(Icons.Rounded.ArrowBack, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.size(6.dp))
                             Text("Retour")
                         }
                     }
                     Spacer(Modifier.weight(1f))
-                    if (step == 0) {
-                        Button(
+                    when (step) {
+                        0 -> Button(
+                            onClick = {
+                                vm.setEnabledTrackers(selectedTrackers)
+                                step = 1
+                            },
+                            enabled = selectedTrackers.isNotEmpty(),
+                            modifier = Modifier.height(56.dp),
+                            shape = RoundedCornerShape(50),
+                        ) { Text("Continuer", style = MaterialTheme.typography.labelLarge) }
+
+                        1 -> Button(
                             onClick = {
                                 persistKeys()
-                                step = 1
+                                step = 2
                             },
                             enabled = hasKey,
                             modifier = Modifier.height(56.dp),
                             shape = RoundedCornerShape(50),
-                        ) {
-                            Text("Continuer", style = MaterialTheme.typography.labelLarge)
-                        }
-                    } else {
-                        TextButton(
-                            onClick = {
-                                persistKeys()
-                                onFinish()
-                            },
-                        ) { Text("Plus tard") }
-                        Spacer(Modifier.size(8.dp))
-                        Button(
-                            onClick = {
-                                persistKeys()
-                                onFinish()
-                            },
-                            enabled = connected,
-                            modifier = Modifier.height(56.dp),
-                            shape = RoundedCornerShape(50),
-                        ) {
-                            Icon(Icons.Rounded.CheckCircle, contentDescription = null, modifier = Modifier.size(18.dp))
+                        ) { Text("Continuer", style = MaterialTheme.typography.labelLarge) }
+
+                        else -> {
+                            TextButton(
+                                onClick = {
+                                    persistKeys()
+                                    onFinish()
+                                },
+                            ) { Text("Plus tard") }
                             Spacer(Modifier.size(8.dp))
-                            Text("Terminer", style = MaterialTheme.typography.labelLarge)
+                            Button(
+                                onClick = {
+                                    persistKeys()
+                                    onFinish()
+                                },
+                                enabled = connected,
+                                modifier = Modifier.height(56.dp),
+                                shape = RoundedCornerShape(50),
+                            ) {
+                                Icon(Icons.Rounded.CheckCircle, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.size(8.dp))
+                                Text("Terminer", style = MaterialTheme.typography.labelLarge)
+                            }
                         }
                     }
                 }
             }
+        }
+    }
+}
+
+/** Carte de selection d'un tracker : logo distant, nom en dessous, coche si active. */
+@Composable
+private fun TrackerChoice(
+    tracker: Tracker,
+    selected: Boolean,
+    onToggle: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        onClick = onToggle,
+        modifier = modifier,
+        shape = RoundedCornerShape(26.dp),
+        color = if (selected) {
+            MaterialTheme.colorScheme.primaryContainer
+        } else {
+            MaterialTheme.colorScheme.surfaceContainerHigh
+        },
+        border = BorderStroke(
+            width = if (selected) 2.dp else 1.dp,
+            color = if (selected) {
+                MaterialTheme.colorScheme.primary
+            } else {
+                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)
+            },
+        ),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 10.dp, vertical = 16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Box {
+                TrackerLogo(url = tracker.logoUrl, label = tracker.label, size = 64)
+                if (selected) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .size(20.dp)
+                            .background(MaterialTheme.colorScheme.primary, CircleShape),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            Icons.Rounded.Check,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onPrimary,
+                            modifier = Modifier.size(14.dp),
+                        )
+                    }
+                }
+            }
+            Text(
+                tracker.label,
+                style = MaterialTheme.typography.titleSmall,
+                textAlign = TextAlign.Center,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }
@@ -460,9 +579,9 @@ private fun StepPill(index: Int, label: String, active: Boolean) {
     Row(
         modifier = Modifier
             .background(container, RoundedCornerShape(50))
-            .padding(horizontal = 14.dp, vertical = 8.dp),
+            .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(7.dp),
     ) {
         Text(
             "$index",

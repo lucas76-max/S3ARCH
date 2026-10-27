@@ -8,13 +8,17 @@ import java.time.ZoneOffset
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 
-/** Les trois trackers integres. L'URL de base est modifiable dans les reglages. */
+/** Les trackers integres. L'URL de base est modifiable dans les reglages. */
 enum class Tracker(
     val id: String,
     val label: String,
     val defaultUrl: String,
     val keyHint: String,
     val docsHint: String,
+    /** Logo affiche sur l'ecran de choix des trackers du premier lancement. */
+    val logoUrl: String,
+    /** Nombre de resultats demandes (YGG Reborn plafonne a 50). */
+    val defaultLimit: Int = 100,
 ) {
     C411(
         id = "c411",
@@ -22,6 +26,7 @@ enum class Tracker(
         defaultUrl = "https://c411.org/api",
         keyHint = "Cle API C411",
         docsHint = "Profil → Parametres → cle API",
+        logoUrl = "https://c411.org/images/logo-md.png",
     ),
     TR4KER(
         id = "tr4ker",
@@ -29,6 +34,7 @@ enum class Tracker(
         defaultUrl = "https://tr4ker.net/api/torznab",
         keyHint = "Cle API TR4KER",
         docsHint = "Mon compte → Parametres → cle API",
+        logoUrl = "https://styles.redditmedia.com/t5_khpdg6/styles/communityIcon_gyvkrjzyydwh1.png?width=128&frame=1&auto=webp&s=ce0ee2f375d9c7440fc81401d0a4e6779920aa39",
     ),
     V3X(
         id = "v3x",
@@ -36,6 +42,24 @@ enum class Tracker(
         defaultUrl = "https://api.v3x.club/torznab",
         keyHint = "Cle API V3X (scope torznab)",
         docsHint = "Reglages → API → cle scope torznab",
+        logoUrl = "https://v3x.club/icon.svg",
+    ),
+    ASTRATORRENT(
+        id = "astratorrent",
+        label = "AstraTorrent",
+        defaultUrl = "https://astratorrent.la/api/torznab.php",
+        keyHint = "Cle API AstraTorrent",
+        docsHint = "Mon cockpit → Seedbox & *Arr → cle API",
+        logoUrl = "https://astratorrent.la/assets/favicon.png",
+    ),
+    YGG_REBORN(
+        id = "ygg",
+        label = "YGG Reborn",
+        defaultUrl = "https://www.yggreborn.org/api",
+        keyHint = "Passkey API YGG Reborn",
+        docsHint = "En haut du site : API → votre passkey",
+        logoUrl = "https://www.yggreborn.org/static/logo.svg",
+        defaultLimit = 50,
     );
 
     companion object {
@@ -62,6 +86,8 @@ data class TrackerSource(
     val url: String,
     val apiKey: String,
     val builtin: Tracker? = null,
+    /** Taille de page demandee au flux Torznab. */
+    val limit: Int = builtin?.defaultLimit ?: 100,
 ) {
     val isCustom: Boolean get() = builtin == null
     val isConfigured: Boolean get() = apiKey.isNotBlank()
@@ -301,15 +327,23 @@ data class AppSettings(
     val tr4kerUrl: String = Tracker.TR4KER.defaultUrl,
     val v3xKey: String = "",
     val v3xUrl: String = Tracker.V3X.defaultUrl,
+    val astraTorrentKey: String = "",
+    val astraTorrentUrl: String = Tracker.ASTRATORRENT.defaultUrl,
+    val yggRebornKey: String = "",
+    val yggRebornUrl: String = Tracker.YGG_REBORN.defaultUrl,
     val enabledTrackers: Set<String> = Tracker.entries.map { it.id }.toSet(),
     val customTrackers: List<CustomTracker> = emptyList(),
     val freeboxHost: String = "mafreebox.freebox.fr",
     val freeboxApiBase: String = "/api/v8",
     val freeboxApiVersion: String = "8",
     val freeboxAppToken: String = "",
-    val freeboxDownloadDir: String = "/Disque dur/S3ARCH",
+    val freeboxDownloadDir: String = FreeboxPaths.DEFAULT_DIR,
     val onboardingDone: Boolean = false,
     val dynamicColor: Boolean = true,
+    /** Palette d'accent choisie quand les couleurs dynamiques sont desactivees. */
+    val accentColor: String = "azure",
+    /** Version de mise a jour ignoree par l'utilisateur (bouton « Ignorer »). */
+    val ignoredUpdateVersion: String = "",
     val sortMode: SortMode = SortMode.SIZE_ASC,
     /** Types de contenus a afficher ; ensemble vide = aucun filtre. */
     val enabledTypes: Set<String> = emptySet(),
@@ -328,12 +362,16 @@ data class AppSettings(
         Tracker.C411 -> c411Key
         Tracker.TR4KER -> tr4kerKey
         Tracker.V3X -> v3xKey
+        Tracker.ASTRATORRENT -> astraTorrentKey
+        Tracker.YGG_REBORN -> yggRebornKey
     }
 
     fun urlFor(tracker: Tracker): String = when (tracker) {
         Tracker.C411 -> c411Url
         Tracker.TR4KER -> tr4kerUrl
         Tracker.V3X -> v3xUrl
+        Tracker.ASTRATORRENT -> astraTorrentUrl
+        Tracker.YGG_REBORN -> yggRebornUrl
     }
 
     /** Toutes les sources disponibles (integrees + tiers). */

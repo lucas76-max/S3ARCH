@@ -9,11 +9,19 @@ import java.util.Base64
  * puis `bt_file_error` :
  *
  * - `/fs/mkdir/` attend un parent **sans** slash final : b64("/Disque dur") ;
- * - `download_dir` attend un chemin **avec** slash final : b64("/Disque dur/S3ARCH/").
+ * - `download_dir` attend un chemin **avec** slash final :
+ *   b64("/Disque dur/Téléchargements/S3ARCH/").
  */
 internal object FreeboxPaths {
 
-    const val DEFAULT_DIR = "/Disque dur/S3ARCH"
+    /**
+     * Dossier reellement utilise par defaut : S3ARCH se place dans le dossier de
+     * telechargement standard de la Freebox, et non directement a la racine du disque.
+     */
+    const val DEFAULT_DIR = "/Disque dur/Téléchargements/S3ARCH"
+
+    /** Ancien chemin par defaut, migre automatiquement vers [DEFAULT_DIR]. */
+    const val LEGACY_DEFAULT_DIR = "/Disque dur/S3ARCH"
 
     /** Chemin absolu, sans double slash, termine par un « / ». */
     fun normalizeDir(dir: String, default: String = DEFAULT_DIR): String {

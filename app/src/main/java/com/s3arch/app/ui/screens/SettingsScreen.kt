@@ -1,7 +1,12 @@
 package com.s3arch.app.ui.screens
 
+import android.content.Intent
+import android.net.Uri
 import android.os.Build
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,12 +22,13 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.CheckCircle
-import androidx.compose.material.icons.rounded.ErrorOutline
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.Button
@@ -45,27 +51,34 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.s3arch.app.BuildConfig
 import com.s3arch.app.data.MediaType
 import com.s3arch.app.data.Tracker
 import com.s3arch.app.data.TrackerSource
+import com.s3arch.app.data.UpdateRepository
 import com.s3arch.app.ui.FreeboxStatus
 import com.s3arch.app.ui.S3archViewModel
 import com.s3arch.app.ui.UiState
 import com.s3arch.app.ui.components.AddTrackerDialog
 import com.s3arch.app.ui.components.CustomTrackerRow
 import com.s3arch.app.ui.components.FreeboxRightsCard
+import com.s3arch.app.ui.components.LogoMark
 import com.s3arch.app.ui.components.ScreenHeader
 import com.s3arch.app.ui.components.SectionCard
 import com.s3arch.app.ui.components.StatusDot
 import com.s3arch.app.ui.components.TrackerKeyEditor
 import com.s3arch.app.ui.components.VpnSettingsContent
 import com.s3arch.app.ui.components.openFreeboxOs
+import com.s3arch.app.ui.theme.AccentPalette
+import com.s3arch.app.ui.theme.AccentPalettes
 import com.s3arch.app.util.AppLog
 import androidx.compose.ui.platform.LocalContext
 
@@ -78,6 +91,10 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
     var tr4kerUrl by rememberSaveable { mutableStateOf(state.settings.tr4kerUrl) }
     var v3xKey by rememberSaveable { mutableStateOf(state.settings.v3xKey) }
     var v3xUrl by rememberSaveable { mutableStateOf(state.settings.v3xUrl) }
+    var astraKey by rememberSaveable { mutableStateOf(state.settings.astraTorrentKey) }
+    var astraUrl by rememberSaveable { mutableStateOf(state.settings.astraTorrentUrl) }
+    var yggKey by rememberSaveable { mutableStateOf(state.settings.yggRebornKey) }
+    var yggUrl by rememberSaveable { mutableStateOf(state.settings.yggRebornUrl) }
     var host by rememberSaveable { mutableStateOf(state.settings.freeboxHost) }
     var folder by rememberSaveable { mutableStateOf(state.settings.freeboxDownloadDir) }
     var showAddTracker by remember { mutableStateOf(false) }
@@ -173,6 +190,44 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
                         },
                         testEnabled = !state.searching,
                     )
+                    TrackerKeyEditor(
+                        tracker = Tracker.ASTRATORRENT,
+                        keyValue = astraKey,
+                        urlValue = astraUrl,
+                        onKeyChange = { astraKey = it },
+                        onUrlChange = { astraUrl = it },
+                        onTest = {
+                            vm.testTracker(
+                                TrackerSource(
+                                    Tracker.ASTRATORRENT.id,
+                                    Tracker.ASTRATORRENT.label,
+                                    astraUrl,
+                                    astraKey,
+                                    Tracker.ASTRATORRENT,
+                                ),
+                            )
+                        },
+                        testEnabled = !state.searching,
+                    )
+                    TrackerKeyEditor(
+                        tracker = Tracker.YGG_REBORN,
+                        keyValue = yggKey,
+                        urlValue = yggUrl,
+                        onKeyChange = { yggKey = it },
+                        onUrlChange = { yggUrl = it },
+                        onTest = {
+                            vm.testTracker(
+                                TrackerSource(
+                                    Tracker.YGG_REBORN.id,
+                                    Tracker.YGG_REBORN.label,
+                                    yggUrl,
+                                    yggKey,
+                                    Tracker.YGG_REBORN,
+                                ),
+                            )
+                        },
+                        testEnabled = !state.searching,
+                    )
                     Button(
                         onClick = {
                             vm.saveApiKeys(
@@ -180,11 +235,15 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
                                     Tracker.C411 to c411Key,
                                     Tracker.TR4KER to tr4kerKey,
                                     Tracker.V3X to v3xKey,
+                                    Tracker.ASTRATORRENT to astraKey,
+                                    Tracker.YGG_REBORN to yggKey,
                                 ),
                                 mapOf(
                                     Tracker.C411 to c411Url,
                                     Tracker.TR4KER to tr4kerUrl,
                                     Tracker.V3X to v3xUrl,
+                                    Tracker.ASTRATORRENT to astraUrl,
+                                    Tracker.YGG_REBORN to yggUrl,
                                 ),
                             )
                         },
@@ -370,35 +429,81 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
         }
 
         item {
+            val dynamicSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+            val dynamicActive = dynamicSupported && state.settings.dynamicColor
+
             SectionCard(
                 modifier = Modifier.padding(horizontal = 16.dp),
                 title = "Apparence",
-                subtitle = "Material You : les couleurs suivent votre fond d'écran.",
+                subtitle = if (dynamicActive) {
+                    "Les couleurs suivent votre fond d'écran."
+                } else {
+                    "Choisissez la couleur d'accent de l'application."
+                },
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        Icons.Rounded.Palette,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                    )
-                    Spacer(Modifier.size(12.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("Couleurs dynamiques", style = MaterialTheme.typography.titleMedium)
-                        Text(
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                                "Palette Material You de l'appareil"
-                            } else {
-                                "Nécessite Android 12 ou plus"
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    // Toute la ligne réagit au clic : un appui sur le libellé ou l'icône
+                    // bascule le mode, au lieu de viser l'interrupteur seul.
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(18.dp))
+                            .clickable(enabled = dynamicSupported) {
+                                vm.setDynamicColor(!state.settings.dynamicColor)
+                            }
+                            .padding(vertical = 4.dp),
+                    ) {
+                        Icon(
+                            Icons.Rounded.Palette,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                        Spacer(Modifier.size(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Couleurs dynamiques", style = MaterialTheme.typography.titleMedium)
+                            Text(
+                                when {
+                                    !dynamicSupported -> "Nécessite Android 12 ou plus"
+                                    state.settings.dynamicColor -> "Palette Material You de l'appareil"
+                                    else -> "Palette d'accent personnalisée"
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(
+                            checked = dynamicActive,
+                            onCheckedChange = { vm.setDynamicColor(it) },
+                            enabled = dynamicSupported,
                         )
                     }
-                    Switch(
-                        checked = state.settings.dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S,
-                        onCheckedChange = { vm.setDynamicColor(it) },
-                        enabled = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S,
-                    )
+
+                    if (!dynamicActive) {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Text(
+                                "Couleur d'accent",
+                                style = MaterialTheme.typography.titleSmall,
+                            )
+                            FlowRow(
+                                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                                verticalArrangement = Arrangement.spacedBy(12.dp),
+                            ) {
+                                AccentPalettes.forEach { palette ->
+                                    AccentSwatch(
+                                        palette = palette,
+                                        selected = state.settings.accentColor == palette.id,
+                                        onClick = { vm.setAccentColor(palette.id) },
+                                    )
+                                }
+                            }
+                            Text(
+                                "La palette s'applique immédiatement à toute l'application.",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -472,40 +577,127 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
         }
 
         item {
-            SectionCard(
-                modifier = Modifier.padding(horizontal = 16.dp),
-                title = "À propos",
+            Surface(
+                modifier = Modifier
+                    .padding(horizontal = 16.dp)
+                    .fillMaxWidth()
+                    .border(
+                        1.dp,
+                        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f),
+                        RoundedCornerShape(30.dp),
+                    ),
+                shape = RoundedCornerShape(30.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerLow,
             ) {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            Icons.Rounded.CheckCircle,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(16.dp),
-                        )
-                        Spacer(Modifier.size(8.dp))
+                Column(
+                    modifier = Modifier.padding(horizontal = 22.dp, vertical = 26.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                ) {
+                    Text(
+                        "S3ARCH",
+                        style = MaterialTheme.typography.displayMedium,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 3.sp,
+                    )
+                    Text(
+                        "Version ${BuildConfig.VERSION_NAME}",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    LogoMark(104)
+
+                    Surface(
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.10f),
+                        shape = RoundedCornerShape(20.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
                         Text(
-                            "S3ARCH ${BuildConfig.VERSION_NAME} · Material 3 Expressive",
+                            "Application utilisant les APIs officielles ou non officielles de " +
+                                "différents trackers, ainsi que l'API Freebox OS pour lancer " +
+                                "directement les téléchargements.",
                             style = MaterialTheme.typography.bodyMedium,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.padding(16.dp),
                         )
                     }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+
+                    OutlinedButton(
+                        onClick = { openPage(context, UpdateRepository.GITHUB_URL) },
+                        shape = RoundedCornerShape(50),
+                    ) {
                         Icon(
-                            Icons.Rounded.ErrorOutline,
+                            Icons.Rounded.OpenInNew,
                             contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(16.dp),
                         )
                         Spacer(Modifier.size(8.dp))
                         Text(
-                            "Les clés API restent sur cet appareil. VLC est requis pour la lecture.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            "github.com/${UpdateRepository.REPO}",
+                            style = MaterialTheme.typography.labelLarge,
                         )
                     }
+
+                    Text(
+                        "Cette application est un outil de téléchargement de fichiers pair-à-pair. " +
+                            "Elle n'incite ni ne cautionne le piratage. Vous êtes seul responsable de " +
+                            "l'usage que vous en faites et du contenu que vous téléchargez ou partagez. " +
+                            "Il vous appartient de vérifier que vous détenez les droits nécessaires sur " +
+                            "les œuvres concernées et que votre utilisation respecte la législation en " +
+                            "vigueur dans votre pays.",
+                        style = MaterialTheme.typography.labelSmall.copy(lineHeight = 16.sp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                    )
                 }
             }
         }
     }
+}
+
+/** Petit nuancier rond : un appui applique la palette. */
+@Composable
+private fun AccentSwatch(
+    palette: AccentPalette,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(5.dp),
+    ) {
+        Surface(
+            onClick = onClick,
+            shape = CircleShape,
+            color = palette.lightPrimary,
+            border = if (selected) {
+                BorderStroke(3.dp, MaterialTheme.colorScheme.onSurface)
+            } else {
+                BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+            },
+            modifier = Modifier.size(46.dp),
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                if (selected) {
+                    Icon(
+                        Icons.Rounded.Check,
+                        contentDescription = "Palette sélectionnée",
+                        tint = MaterialTheme.colorScheme.onPrimary,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+            }
+        }
+        Text(
+            palette.label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/** Ouvre un lien externe sans faire planter l'application si aucun navigateur n'existe. */
+private fun openPage(context: android.content.Context, url: String) {
+    runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
+        .onFailure { AppLog.warn("UI", "Ouverture du lien impossible : ${it.message}") }
 }

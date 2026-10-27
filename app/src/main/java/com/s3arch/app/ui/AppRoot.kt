@@ -31,12 +31,15 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.s3arch.app.ui.components.LogoMark
+import com.s3arch.app.ui.components.UpdateBanner
+import com.s3arch.app.ui.components.UpdateDialog
 import com.s3arch.app.ui.components.VpnConsentEffect
 import com.s3arch.app.ui.theme.S3ARCHTheme
 import com.s3arch.app.ui.screens.DownloadsScreen
@@ -64,7 +67,10 @@ fun AppRoot(vm: S3archViewModel) {
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
     LaunchedEffect(state.loaded) {
-        if (state.loaded) vm.applyNetworkMode()
+        if (state.loaded) {
+            vm.applyNetworkMode()
+            vm.checkForUpdates()
+        }
     }
 
     LaunchedEffect(state.message) {
@@ -75,7 +81,10 @@ fun AppRoot(vm: S3archViewModel) {
         }
     }
 
-    S3ARCHTheme(dynamicColor = state.settings.dynamicColor) {
+    S3ARCHTheme(
+        dynamicColor = state.settings.dynamicColor,
+        accentColor = state.settings.accentColor,
+    ) {
         VpnConsentEffect(state, vm)
         when {
             !state.loaded -> SplashScreen()
@@ -98,16 +107,32 @@ private fun MainScaffold(
 ) {
     var tab by rememberSaveable { mutableStateOf(0) }
     val activeDownloads = state.tasks.values.count { !it.isDone && !it.isError }
+    val context = LocalContext.current
+
+    UpdateDialog(
+        update = state.update,
+        visible = state.updateDialogOpen,
+        busy = state.updateBusy,
+        progress = state.updateProgress,
+        onDismiss = { vm.closeUpdateDetails() },
+        onInstall = { vm.installUpdate(context) },
+    )
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         snackbarHost = { SnackbarHost(snackbarHostState) },
         bottomBar = {
-            NavigationBar(
-                containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                tonalElevation = 0.dp,
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-            ) {
+            Column {
+                UpdateBanner(
+                    update = state.update,
+                    onIgnore = { vm.ignoreUpdate() },
+                    onOpen = { vm.openUpdateDetails() },
+                )
+                NavigationBar(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                    tonalElevation = 0.dp,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                ) {
                 NavigationBarItem(
                     selected = tab == 0,
                     onClick = { tab = 0 },
@@ -141,6 +166,7 @@ private fun MainScaffold(
                         indicatorColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.16f),
                     ),
                 )
+                }
             }
         },
     ) { padding ->

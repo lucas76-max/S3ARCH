@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Context
 import android.content.Intent
 import android.util.Base64
+import com.s3arch.app.BuildConfig
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.s3arch.app.data.AppSettings
@@ -19,10 +20,13 @@ import com.s3arch.app.data.Tracker
 import com.s3arch.app.data.TrackerException
 import com.s3arch.app.data.TrackerSource
 import com.s3arch.app.data.TrackedDownload
+import com.s3arch.app.data.UpdateException
+import com.s3arch.app.data.UpdateRepository
 import com.s3arch.app.data.VlcProxyServer
 import com.s3arch.app.data.freeboxPath
 import com.s3arch.app.data.playableMedia
 import com.s3arch.app.data.vpn.VpnTunnel
+import com.s3arch.app.util.ApkInstaller
 import com.s3arch.app.util.AppLog
 import com.s3arch.app.util.DownloadUrls
 import com.s3arch.app.ui.player.PlayerActivity
@@ -38,6 +42,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Socket
@@ -76,6 +81,12 @@ data class UiState(
      * Le droit `settings` conditionne l'acces a `/vpn/`.
      */
     val freeboxRights: Set<String>? = null,
+    /** Release GitHub plus recente que l'application installee. */
+    val update: com.s3arch.app.data.AppUpdate? = null,
+    /** Le detail de la mise a jour (changelog + bouton) est ouvert. */
+    val updateDialogOpen: Boolean = false,
+    val updateBusy: Boolean = false,
+    val updateProgress: Float = 0f,
 ) {
     /** Vrai quand la box a explicitement refuse le droit utile au VPN. */
     val needsSettingsRight: Boolean get() = freeboxRights?.contains("settings") == false
@@ -87,6 +98,12 @@ class S3archViewModel(app: Application) : AndroidViewModel(app) {
     private val torznab = TorznabClient()
     private val freebox = FreeboxApi()
     private val proxy = VlcProxyServer()
+    private val updates = UpdateRepository(app)
+
+    @Volatile private var updateChecked = false
+
+    /** APK deja telecharge pour la mise a jour proposee. */
+    @Volatile private var downloadedUpdate: File? = null
 
     private val _state = MutableStateFlow(UiState())
     val state: StateFlow<UiState> = _state.asStateFlow()
@@ -135,6 +152,14 @@ class S3archViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setDynamicColor(enabled: Boolean) {
         viewModelScope.launch { repo.setDynamicColor(enabled) }
+    }
+
+    fun setAccentColor(id: String) {
+        viewModelScope.launch { repo.setAccentColor(id) }
+    }
+
+    fun setEnabledTrackers(ids: Set<String>) {
+        viewModelScope.launch { repo.setEnabledTrackers(ids) }
     }
 
     fun setSortMode(mode: SortMode) {
@@ -722,10 +747,31 @@ class S3archViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * Cree la configuration VPN cote box, etape par etape.
+     *
+     * Chaque etape est journalisee avec son nom : en cas d'`internal_error` (reponse
+     * generique de la Freebox), le journal indique precisement si le refus vient de
+     * l'activation du serveur, de la creation de l'utilisateur ou de la configuration.
+     */
     private suspend fun createVpnConfig(settings: AppSettings): String {
-        val server = freebox.vpnServers().firstOrNull { it.type == "wireguard" }
+        AppLog.info("VPN", "Étape 1/3 : recherche du serveur WireGuard")
+        val servers = freebox.vpnServers()
+        val server = servers.firstOrNull { it.type == "wireguard" }
             ?: throw FreeboxException("Cette Freebox n'expose pas de serveur WireGuard")
-        if (server.state != "started") freebox.enableWireGuardServer(server.id)
+        AppLog.info("VPN", "Serveur « ${server.id} » (état : ${server.state})")
+
+        if (server.state != "started") {
+            AppLog.info("VPN", "Étape 2/3 : activation du serveur WireGuard")
+            freebox.enableWireGuardServer(server.id)
+            // Le serveur demarre de facon asynchrone : le creer trop tot donne un
+            // `internal_error` generique cote box.
+            if (!freebox.awaitVpnServerStarted(server.id)) {
+                AppLog.warn("VPN", "Serveur WireGuard pas encore démarré : nouvel essai de création")
+            }
+        }
+
+        AppLog.info("VPN", "Étape 3/3 : utilisateur et configuration")
         val login = freebox.ensureWireGuardUser(settings.vpnLogin)
         return freebox.wireGuardConfig(server.id, login)
     }
@@ -817,6 +863,84 @@ class S3archViewModel(app: Application) : AndroidViewModel(app) {
 
     fun finishOnboarding() {
         viewModelScope.launch { repo.completeOnboarding() }
+    }
+
+    // ------------------------------------------------------------------ mises a jour
+
+    /**
+     * Interroge GitHub Releases une seule fois par lancement.
+     *
+     * Aucune erreur n'est remontee a l'utilisateur : hors ligne, l'application doit
+     * demarrer normalement. Une version ignoree n'est plus proposee.
+     */
+    fun checkForUpdates() {
+        if (updateChecked) return
+        updateChecked = true
+        viewModelScope.launch {
+            val found = updates.latest(BuildConfig.VERSION_NAME) ?: return@launch
+            if (found.version == _state.value.settings.ignoredUpdateVersion) {
+                AppLog.info("Update", "Version ${found.version} ignorée par l'utilisateur")
+                return@launch
+            }
+            _state.update { it.copy(update = found) }
+        }
+    }
+
+    fun openUpdateDetails() {
+        if (_state.value.update == null) return
+        _state.update { it.copy(updateDialogOpen = true) }
+    }
+
+    fun closeUpdateDetails() {
+        _state.update { it.copy(updateDialogOpen = false) }
+    }
+
+    /** « Ignorer » : le bandeau ne revient plus pour cette version. */
+    fun ignoreUpdate() {
+        val update = _state.value.update ?: return
+        downloadedUpdate = null
+        _state.update { it.copy(update = null, updateDialogOpen = false) }
+        viewModelScope.launch { repo.setIgnoredUpdateVersion(update.version) }
+        message("Mise à jour ${update.version} ignorée")
+    }
+
+    /**
+     * Telecharge l'APK de la release puis lance l'installateur Android.
+     *
+     * Le fichier reste dans le dossier prive de l'application (`updates/`) et n'est
+     * partage qu'avec l'installateur via le FileProvider declare dans le manifeste.
+     */
+    fun installUpdate(context: Context) {
+        if (_state.value.updateBusy) return
+        val update = _state.value.update ?: return
+        viewModelScope.launch {
+            _state.update { it.copy(updateBusy = true, updateProgress = 0f) }
+            try {
+                val file = downloadedUpdate ?: withContext(Dispatchers.IO) {
+                    updates.download(update) { progress ->
+                        _state.update { it.copy(updateProgress = progress) }
+                    }
+                }.also { downloadedUpdate = it }
+
+                _state.update { it.copy(updateBusy = false, updateProgress = 1f) }
+                val problem = withContext(Dispatchers.IO) { ApkInstaller.install(context, file) }
+                if (problem != null) {
+                    message(problem)
+                } else {
+                    _state.update { it.copy(updateDialogOpen = false) }
+                    message("Installation de S3ARCH ${update.version}…")
+                }
+            } catch (e: Exception) {
+                AppLog.throwable("Update", "Mise a jour impossible", e)
+                _state.update { it.copy(updateBusy = false, updateProgress = 0f) }
+                message(
+                    when (e) {
+                        is UpdateException -> e.message ?: "Mise à jour impossible"
+                        else -> e.message?.takeIf { it.isNotBlank() } ?: "Mise à jour impossible"
+                    },
+                )
+            }
+        }
     }
 
     fun message(text: String) {

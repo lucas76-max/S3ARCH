@@ -10,6 +10,7 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.interaction.InteractionSource
@@ -22,6 +23,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.CircleShape
@@ -43,6 +45,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -51,6 +55,9 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
+import com.s3arch.app.R
 import com.s3arch.app.data.CustomTracker
 
 /** Effet d'appui "expressive" : le composant se compresse legerement. */
@@ -293,27 +300,50 @@ fun StatusDot(color: Color, modifier: Modifier = Modifier) {
     )
 }
 
+/** Logo de l'application (vectoriel, identique a l'icone de lancement). */
 @Composable
 fun LogoMark(size: Int = 52) {
+    Image(
+        painter = painterResource(R.drawable.app_logo),
+        contentDescription = "S3ARCH",
+        modifier = Modifier.size(size.dp),
+    )
+}
+
+/**
+ * Logo distant d'un tracker (PNG ou SVG). L'initiale du tracker reste affichee
+ * pendant le chargement et si le logo est introuvable, pour ne jamais laisser un vide.
+ */
+@Composable
+fun TrackerLogo(
+    url: String?,
+    label: String,
+    size: Int = 56,
+    modifier: Modifier = Modifier,
+) {
     Box(
-        modifier = Modifier
+        modifier = modifier
             .size(size.dp)
-            .background(
-                Brush.linearGradient(
-                    listOf(
-                        MaterialTheme.colorScheme.primary,
-                        MaterialTheme.colorScheme.secondary,
-                    ),
-                ),
-                RoundedCornerShape((size / 3).dp),
-            ),
+            .background(MaterialTheme.colorScheme.surfaceContainerHighest, RoundedCornerShape((size / 4).dp))
+            .padding((size / 9).dp),
         contentAlignment = Alignment.Center,
     ) {
         Text(
-            text = "S3",
+            text = label.trim().take(1).uppercase(),
             style = MaterialTheme.typography.titleLarge,
-            color = MaterialTheme.colorScheme.onPrimary,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        if (!url.isNullOrBlank()) {
+            AsyncImage(
+                model = ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current)
+                    .data(url)
+                    .crossfade(true)
+                    .build(),
+                contentDescription = label,
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
     }
 }
 

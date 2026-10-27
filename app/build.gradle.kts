@@ -23,8 +23,8 @@ android {
         applicationId = "com.s3arch.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 14
-        versionName = "1.2.0"
+        versionCode = 15
+        versionName = "1.3.0"
     }
 
     signingConfigs {
@@ -92,6 +92,8 @@ dependencies {
     implementation("androidx.media3:media3-ui:1.5.1")
     implementation("androidx.lifecycle:lifecycle-process:2.8.7")
     implementation("com.wireguard.android:tunnel:1.0.20230706")
+    implementation("io.coil-kt:coil-compose:2.7.0")
+    implementation("io.coil-kt:coil-svg:2.7.0")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 

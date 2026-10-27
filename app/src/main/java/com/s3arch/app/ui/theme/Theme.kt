@@ -10,13 +10,109 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
+import androidx.compose.material3.ColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+
+/**
+ * Palette d'accent choisie dans les reglages quand les couleurs dynamiques sont
+ * desactivees (ou sur un appareil anterieur a Android 12).
+ */
+data class AccentPalette(
+    val id: String,
+    val label: String,
+    val lightPrimary: Color,
+    val lightSecondary: Color,
+    val darkPrimary: Color,
+    val darkSecondary: Color,
+)
+
+val AccentPalettes = listOf(
+    AccentPalette(
+        id = "azure",
+        label = "Azur",
+        lightPrimary = Color(0xFF00639B),
+        lightSecondary = Color(0xFF5A4FB8),
+        darkPrimary = Color(0xFF8FD3FF),
+        darkSecondary = Color(0xFFCFC2FF),
+    ),
+    AccentPalette(
+        id = "violet",
+        label = "Violet",
+        lightPrimary = Color(0xFF6B4BC4),
+        lightSecondary = Color(0xFF8A4FA8),
+        darkPrimary = Color(0xFFCFC2FF),
+        darkSecondary = Color(0xFFE8C9FF),
+    ),
+    AccentPalette(
+        id = "emeraude",
+        label = "Émeraude",
+        lightPrimary = Color(0xFF1F6F4A),
+        lightSecondary = Color(0xFF2E7D5B),
+        darkPrimary = Color(0xFF7DE2BC),
+        darkSecondary = Color(0xFFA7E8CF),
+    ),
+    AccentPalette(
+        id = "ambre",
+        label = "Ambre",
+        lightPrimary = Color(0xFF8A5300),
+        lightSecondary = Color(0xFF7A5A00),
+        darkPrimary = Color(0xFFFFC46B),
+        darkSecondary = Color(0xFFF0D48A),
+    ),
+    AccentPalette(
+        id = "framboise",
+        label = "Framboise",
+        lightPrimary = Color(0xFFA12D5E),
+        lightSecondary = Color(0xFF7A4BB5),
+        darkPrimary = Color(0xFFFFB0CC),
+        darkSecondary = Color(0xFFE0C7FF),
+    ),
+    AccentPalette(
+        id = "ardoise",
+        label = "Ardoise",
+        lightPrimary = Color(0xFF4A5568),
+        lightSecondary = Color(0xFF5B6472),
+        darkPrimary = Color(0xFFB8C4D6),
+        darkSecondary = Color(0xFFCBD5E1),
+    ),
+)
+
+fun accentPalette(id: String?): AccentPalette =
+    AccentPalettes.firstOrNull { it.id == id } ?: AccentPalettes.first()
+
+/**
+ * Applique la palette choisie sur le schema de base en gardant les tons de fond.
+ * Les conteneurs sont derives pour rester lisibles en clair comme en sombre.
+ */
+private fun ColorScheme.withAccent(palette: AccentPalette, dark: Boolean): ColorScheme {
+    val accent = if (dark) palette.darkPrimary else palette.lightPrimary
+    val second = if (dark) palette.darkSecondary else palette.lightSecondary
+    val third = lerp(accent, second, 0.5f)
+    fun on(color: Color): Color =
+        if (color.luminance() > 0.55f) Color(0xFF08131C) else Color(0xFFFFFFFF)
+    return copy(
+        primary = accent,
+        onPrimary = on(accent),
+        primaryContainer = lerp(surface, accent, if (dark) 0.30f else 0.18f),
+        onPrimaryContainer = if (dark) Color(0xFFEAF4FF) else Color(0xFF0A2233),
+        secondary = second,
+        onSecondary = on(second),
+        secondaryContainer = lerp(surface, second, if (dark) 0.28f else 0.16f),
+        onSecondaryContainer = if (dark) Color(0xFFF3ECFF) else Color(0xFF1C1233),
+        tertiary = third,
+        onTertiary = on(third),
+        tertiaryContainer = lerp(surface, third, if (dark) 0.26f else 0.15f),
+        onTertiaryContainer = if (dark) Color(0xFFF7EEFF) else Color(0xFF211427),
+    )
+}
 
 // Palette de repli (utilisee avant Android 12 ou si la couleur dynamique est desactivee).
 private val DarkColors = darkColorScheme(
@@ -114,16 +210,18 @@ private val ExpressiveShapes = Shapes(
 fun S3ARCHTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
     dynamicColor: Boolean = true,
+    accentColor: String = "azure",
     content: @Composable () -> Unit,
 ) {
     val context = LocalContext.current
+    val palette = accentPalette(accentColor)
     val colors = when {
         dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && darkTheme ->
             dynamicDarkColorScheme(context)
         dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ->
             dynamicLightColorScheme(context)
-        darkTheme -> DarkColors
-        else -> LightColors
+        darkTheme -> DarkColors.withAccent(palette, dark = true)
+        else -> LightColors.withAccent(palette, dark = false)
     }
 
     MaterialTheme(

@@ -14,7 +14,10 @@ class FreeboxPathsTest {
 
     @Test
     fun `utilise le dossier par defaut si vide`() {
-        assertEquals("/Disque dur/S3ARCH/", FreeboxPaths.normalizeDir("   "))
+        // S3ARCH se place dans le dossier de telechargements de la Freebox : c'est
+        // exactement le chemin annonce dans l'interface.
+        assertEquals("/Disque dur/Téléchargements/S3ARCH/", FreeboxPaths.normalizeDir("   "))
+        assertEquals("/Disque dur/Téléchargements/S3ARCH", FreeboxPaths.DEFAULT_DIR)
     }
 
     @Test
