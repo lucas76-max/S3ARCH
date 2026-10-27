@@ -51,6 +51,35 @@ internal object VpnUserRequests {
         },
     )
 
+    /**
+     * Variantes sans reservation d'adresse, essayees en dernier recours.
+     *
+     * Certains firmwares refusent toute `ip_reservation` explicite (pool WireGuard vide,
+     * adresse jugee hors pool, ou choix laisse a la box) et repondent `internal_error`.
+     * Les exemples de la documentation montrent aussi `ip_reservation` vide : on laisse
+     * alors la Freebox attribuer elle-meme l'adresse. `type` reste present, sans quoi la
+     * requete est invalide.
+     */
+    fun withoutReservationPayloads(login: String, password: String): List<JsonObject> = listOf(
+        buildJsonObject {
+            put("login", login)
+            put("type", "wireguard")
+            put("ip_reservation", "")
+            put("password", password)
+        },
+        buildJsonObject {
+            put("login", login)
+            put("type", "wireguard")
+            put("password", password)
+        },
+        buildJsonObject {
+            put("login", login)
+            put("type", "wireguard")
+            put("ip_reservation", "")
+            put("conf_wireguard", wireGuardConf())
+        },
+    )
+
     private fun wireGuardConf(): JsonObject = buildJsonObject {
         put("keepalive", KEEPALIVE)
         put("psk", false)

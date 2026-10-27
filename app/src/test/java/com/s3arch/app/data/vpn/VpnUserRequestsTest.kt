@@ -48,6 +48,22 @@ class VpnUserRequestsTest {
     }
 
     @Test
+    fun `les variantes de secours laissent la box choisir l'adresse`() {
+        val fallbacks = VpnUserRequests.withoutReservationPayloads("s3arch", "motdepasse24caracteres")
+        assertTrue(fallbacks.isNotEmpty())
+        fallbacks.forEach { payload ->
+            val obj = payload.jsonObject
+            // `type` reste obligatoire, sinon la requete est invalide.
+            assertEquals("wireguard", obj["type"]?.jsonPrimitive?.content)
+            val reservation = obj["ip_reservation"]?.jsonPrimitive?.content
+            assertTrue(reservation == null || reservation.isEmpty())
+        }
+        assertTrue(
+            fallbacks.any { it.jsonObject["password"]?.jsonPrimitive?.content == "motdepasse24caracteres" },
+        )
+    }
+
+    @Test
     fun `les adresses candidates sont prises dans le pool et evitent les reservations`() {
         assertEquals(
             listOf("192.168.27.65", "192.168.27.66", "192.168.27.67"),

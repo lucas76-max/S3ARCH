@@ -742,13 +742,6 @@ class FreeboxApi {
         val candidates = pool?.let {
             VpnAddresses.freeIps(it.start, it.end, it.reserved, limit = 3)
         }.orEmpty()
-        if (candidates.isEmpty()) {
-            throw FreeboxException(
-                "Aucune adresse VPN libre sur la Freebox : supprimez un utilisateur VPN " +
-                    "dans Freebox OS, puis réessayez",
-                "no_free_ip",
-            )
-        }
 
         val password = randomSecret(24)
         var lastError: Throwable? = null
@@ -777,6 +770,32 @@ class FreeboxApi {
             }
         }
 
+        // Adresse refusee (pool vide, hors pool, reservee) : on laisse la box choisir.
+        VpnUserRequests.withoutReservationPayloads(login, password).forEachIndexed { index, payload ->
+            AppLog.info("VPN", "POST /vpn/user/ (sans adresse réservée, variante ${index + 1})")
+            lastError = runCatching { authCall("/vpn/user/", "POST", payload) }.exceptionOrNull()
+            if (lastError == null) {
+                AppLog.info("VPN", "Utilisateur WireGuard « $login » créé par la Freebox")
+                return@withContext login
+            }
+            AppLog.error("VPN", "Création refusée (sans adresse, variante ${index + 1}) : ${lastError?.message}")
+            if (vpnUsers().contains(login)) return@withContext login
+        }
+
+        // Dernier recours : la box peut deja heberger un utilisateur WireGuard (cree dans
+        // Freebox OS ou par un essai precedent). Sa configuration donne exactement le meme
+        // acces distant : on la reutilise plutot que de laisser l'utilisateur sans VPN.
+        val reusable = runCatching { wireGuardUsers() }.getOrNull().orEmpty()
+            .firstOrNull { it.login.isNotBlank() }
+        if (reusable != null) {
+            AppLog.warn(
+                "VPN",
+                "Création refusée (${lastError?.message}) : réutilisation de l'utilisateur " +
+                    "WireGuard existant « ${reusable.login} »",
+            )
+            return@withContext reusable.login
+        }
+
         val detail = lastError?.message ?: "erreur inconnue"
         throw FreeboxException(
             "Création de l'utilisateur VPN refusée par la Freebox ($detail). " +
@@ -787,12 +806,21 @@ class FreeboxApi {
     }
 
     /** Logins des utilisateurs VPN existants (vide si la box ne repond pas). */
-    private suspend fun vpnUsers(): Set<String> {
+    private suspend fun vpnUsers(): Set<String> = vpnUserList().map { it.login }.toSet()
+
+    /** Utilisateurs VPN de la box, avec leur type (`standard` ou `wireguard`). */
+    private suspend fun vpnUserList(): List<VpnUser> {
         val users = runCatching { authCall("/vpn/user/", "GET", null) }.getOrNull() as? JsonArray
         return users.orEmpty().mapNotNull { element ->
-            (element as? JsonObject)?.get("login")?.jsonPrimitive?.contentOrNull
-        }.toSet()
+            val obj = element as? JsonObject ?: return@mapNotNull null
+            val login = obj["login"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+            VpnUser(login = login, type = obj["type"]?.jsonPrimitive?.contentOrNull.orEmpty())
+        }
     }
+
+    /** Utilisateurs WireGuard deja presents sur la box. */
+    private suspend fun wireGuardUsers(): List<VpnUser> =
+        vpnUserList().filter { it.type.equals("wireguard", ignoreCase = true) }
 
     /** Mot de passe aleatoire (8 a 32 caracteres, exigence de la Freebox). */
     private fun randomSecret(length: Int): String {
@@ -851,6 +879,8 @@ class FreeboxApi {
     }
 
     data class VpnServer(val id: String, val type: String, val state: String)
+
+    data class VpnUser(val login: String, val type: String)
 
     data class VpnPool(val start: String, val end: String, val reserved: Set<String>)
 

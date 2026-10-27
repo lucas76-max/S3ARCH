@@ -1,6 +1,6 @@
 # S3ARCH
 
-**Version 1.3.0**
+**Version 1.3.1**
 
 Application Android **Material You** (couleurs dynamiques issues du fond d'écran sur Android 12+,
 ou palette d'accent personnalisée quand elles sont désactivées) pour chercher un contenu sur
@@ -222,7 +222,11 @@ de passe de secours si le firmware l'exige, puis sur une autre adresse du pool. 
 que le serveur WireGuard soit passé à l'état `started` : une création pendant `starting` est
 refusée de la même façon. Enfin, un `internal_error` peut survenir après une création réussie :
 l'app relit la liste `/vpn/user/` avant de conclure à un échec, et le journal indique l'adresse et
-la variante essayées.
+la variante essayées. Si la box refuse malgré tout la création (pool WireGuard vide ou adresse
+rejetée), l'app essaie des variantes **sans adresse réservée** — c'est alors la Freebox qui
+attribue l'adresse — puis, en dernier recours, **réutilise un utilisateur WireGuard déjà présent**
+sur la box : sa configuration donne exactement le même accès distant, le VPN fonctionne donc même
+quand la création est refusée.
 
 La configuration obtenue (clé privée, clé publique du serveur, endpoint, DNS, MTU) est conservée
 sur l'appareil, et le tunnel est monté par la bibliothèque officielle
