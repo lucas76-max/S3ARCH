@@ -1,10 +1,10 @@
 # S3ARCH
 
-**Version 1.3.2**
+**Version 1.4.0**
 
 Application Android **Material You** (couleurs dynamiques issues du fond d'écran sur Android 12+,
 ou palette d'accent personnalisée quand elles sont désactivées) pour chercher un contenu sur
-plusieurs trackers torrent (C411, TR4KER, V3X, AstraTorrent, YGG Reborn et tout endpoint Torznab
+plusieurs trackers torrent (C411, TR4KER, V3X, AstraTorrent, YGG Reborn, ZXX Club et tout endpoint Torznab
 tiers), lancer le téléchargement directement sur la **Freebox** via l'API officielle Freebox OS,
 suivre la progression en temps réel et lire le fichier dans un **lecteur intégré**
 (Media3/ExoPlayer) ou avec **VLC**.
@@ -12,9 +12,9 @@ suivre la progression en temps réel et lire le fichier dans un **lecteur intég
 ## Fonctionnalités
 
 - **Choix des trackers au premier lancement** : les logos et les noms de C411, TR4KER, V3X,
-  AstraTorrent et YGG Reborn sont affichés ; un appui active ou désactive chaque tracker.
-- **Recherche multi-trackers** : C411, TR4KER, V3X, AstraTorrent et YGG Reborn (protocole Torznab),
-  requêtes en parallèle, fusion des résultats.
+  AstraTorrent, YGG Reborn et ZXX Club sont affichés ; un appui active ou désactive chaque tracker.
+- **Recherche multi-trackers** : C411, TR4KER, V3X, AstraTorrent, YGG Reborn et ZXX Club
+  (protocole Torznab), requêtes en parallèle, fusion des résultats.
 - **Trackers tiers** : ajout d'un endpoint Torznab personnalisé, avec avertissement explicite que
   la compatibilité n'est **pas garantie**.
 - **Tri au choix** : taille croissante (par défaut), taille décroissante, seeders décroissants,
@@ -23,6 +23,10 @@ suivre la progression en temps réel et lire le fichier dans un **lecteur intég
 - **Filtre facultatif par type de contenu** (Réglages → Types de contenus) : Films, Séries,
   Musique, Ebooks, Applications, Jeux, XXX, Autres. Aucun type coché = tous les résultats ; le
   nombre de résultats masqués est indiqué sous la barre de recherche.
+- **Masquage des torrents à 0 seeder** (actif par défaut, Réglages → Résultats) : les résultats
+  sans source sont retirés de la liste, avec le nombre masqué indiqué sous la barre de recherche.
+  Un tracker qui n'expose pas l'attribut `seeders` garde tous ses résultats : le filtre ne
+  s'applique qu'aux trackers publiant au moins une valeur non nulle.
 - **Transferts détaillés** : nombre de seeders, débit courant en **Mbps**, pourcentage, volume et
   temps restant, avec une barre de progression animée en vague Material.
 - **Mise à jour intégrée** : au lancement, S3ARCH interroge les releases GitHub. Un bandeau
@@ -80,6 +84,7 @@ Les clés se récupèrent sur chaque tracker (profil / paramètres → clé API)
 | V3X | `https://api.v3x.club/torznab` | Réglages → Intégrations / API (scope `torznab`) |
 | AstraTorrent | `https://astratorrent.la/api/torznab.php` | Mon cockpit → Seedbox & *Arr → clé API |
 | YGG Reborn | `https://www.yggreborn.org/api` | En haut du site : API → passkey |
+| ZXX Club | `https://zxxclub.com/api/torznab` | Compte (en haut à gauche) → API & Applications → clé « lecture » |
 
 La recherche utilise `?t=search&apikey=…&q=…&limit=100&extended=1`. Si un tracker expose un
 autre chemin, l'URL est modifiable dans l'app (bouton « URL » à côté de chaque clé).

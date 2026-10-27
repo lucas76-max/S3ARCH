@@ -95,6 +95,8 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
     var astraUrl by rememberSaveable { mutableStateOf(state.settings.astraTorrentUrl) }
     var yggKey by rememberSaveable { mutableStateOf(state.settings.yggRebornKey) }
     var yggUrl by rememberSaveable { mutableStateOf(state.settings.yggRebornUrl) }
+    var zxxKey by rememberSaveable { mutableStateOf(state.settings.zxxClubKey) }
+    var zxxUrl by rememberSaveable { mutableStateOf(state.settings.zxxClubUrl) }
     var host by rememberSaveable { mutableStateOf(state.settings.freeboxHost) }
     var folder by rememberSaveable { mutableStateOf(state.settings.freeboxDownloadDir) }
     var showAddTracker by remember { mutableStateOf(false) }
@@ -228,6 +230,25 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
                         },
                         testEnabled = !state.searching,
                     )
+                    TrackerKeyEditor(
+                        tracker = Tracker.ZXX_CLUB,
+                        keyValue = zxxKey,
+                        urlValue = zxxUrl,
+                        onKeyChange = { zxxKey = it },
+                        onUrlChange = { zxxUrl = it },
+                        onTest = {
+                            vm.testTracker(
+                                TrackerSource(
+                                    Tracker.ZXX_CLUB.id,
+                                    Tracker.ZXX_CLUB.label,
+                                    zxxUrl,
+                                    zxxKey,
+                                    Tracker.ZXX_CLUB,
+                                ),
+                            )
+                        },
+                        testEnabled = !state.searching,
+                    )
                     Button(
                         onClick = {
                             vm.saveApiKeys(
@@ -237,6 +258,7 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
                                     Tracker.V3X to v3xKey,
                                     Tracker.ASTRATORRENT to astraKey,
                                     Tracker.YGG_REBORN to yggKey,
+                                    Tracker.ZXX_CLUB to zxxKey,
                                 ),
                                 mapOf(
                                     Tracker.C411 to c411Url,
@@ -244,6 +266,7 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
                                     Tracker.V3X to v3xUrl,
                                     Tracker.ASTRATORRENT to astraUrl,
                                     Tracker.YGG_REBORN to yggUrl,
+                                    Tracker.ZXX_CLUB to zxxUrl,
                                 ),
                             )
                         },
@@ -328,6 +351,41 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
                             Text("Désactiver le filtre")
                         }
                     }
+                }
+            }
+        }
+
+        item {
+            SectionCard(
+                modifier = Modifier.padding(horizontal = 16.dp),
+                title = "Résultats",
+                subtitle = "Filtres appliqués à la liste de recherche.",
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(18.dp))
+                        .clickable { vm.setHideZeroSeeders(!state.settings.hideZeroSeeders) }
+                        .padding(vertical = 4.dp),
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Masquer les torrents à 0 seeder", style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            if (state.settings.hideZeroSeeders) {
+                                "Les résultats sans source sont masqués ; le nombre caché est indiqué sous la barre de recherche."
+                            } else {
+                                "Tous les résultats sont affichés, même sans source."
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Spacer(Modifier.size(12.dp))
+                    Switch(
+                        checked = state.settings.hideZeroSeeders,
+                        onCheckedChange = { vm.setHideZeroSeeders(it) },
+                    )
                 }
             }
         }

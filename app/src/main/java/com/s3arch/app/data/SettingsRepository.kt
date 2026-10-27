@@ -33,6 +33,8 @@ class SettingsRepository(private val context: Context) {
             astraTorrentUrl = prefs[URL_ASTRA] ?: Tracker.ASTRATORRENT.defaultUrl,
             yggRebornKey = prefs[KEY_YGG] ?: "",
             yggRebornUrl = prefs[URL_YGG] ?: Tracker.YGG_REBORN.defaultUrl,
+            zxxClubKey = prefs[KEY_ZXX] ?: "",
+            zxxClubUrl = prefs[URL_ZXX] ?: Tracker.ZXX_CLUB.defaultUrl,
             enabledTrackers = prefs[ENABLED] ?: Tracker.entries.map { it.id }.toSet(),
             customTrackers = decodeCustom(prefs[CUSTOM]),
             freeboxHost = prefs[FB_HOST] ?: "mafreebox.freebox.fr",
@@ -51,6 +53,7 @@ class SettingsRepository(private val context: Context) {
             ignoredUpdateVersion = prefs[IGNORED_UPDATE] ?: "",
             sortMode = SortMode.fromId(prefs[SORT_MODE]),
             enabledTypes = prefs[TYPES] ?: emptySet(),
+            hideZeroSeeders = prefs[HIDE_ZERO_SEEDERS] ?: true,
             vpnEnabled = prefs[VPN_ENABLED] ?: false,
             vpnPromptAnswered = prefs[VPN_ANSWERED] ?: false,
             vpnConfig = prefs[VPN_CONFIG] ?: "",
@@ -72,6 +75,7 @@ class SettingsRepository(private val context: Context) {
         Tracker.V3X -> KEY_V3X
         Tracker.ASTRATORRENT -> KEY_ASTRA
         Tracker.YGG_REBORN -> KEY_YGG
+        Tracker.ZXX_CLUB -> KEY_ZXX
     }
 
     private fun urlPreference(tracker: Tracker) = when (tracker) {
@@ -80,6 +84,7 @@ class SettingsRepository(private val context: Context) {
         Tracker.V3X -> URL_V3X
         Tracker.ASTRATORRENT -> URL_ASTRA
         Tracker.YGG_REBORN -> URL_YGG
+        Tracker.ZXX_CLUB -> URL_ZXX
     }
 
     suspend fun setEnabledTrackers(ids: Set<String>) {
@@ -133,6 +138,11 @@ class SettingsRepository(private val context: Context) {
     /** Mise a jour ignoree : le bandeau ne revient plus pour cette version. */
     suspend fun setIgnoredUpdateVersion(version: String) {
         context.dataStore.edit { it[IGNORED_UPDATE] = version.trim() }
+    }
+
+    /** Masque les torrents sans seeder dans la liste de resultats. */
+    suspend fun setHideZeroSeeders(hide: Boolean) {
+        context.dataStore.edit { it[HIDE_ZERO_SEEDERS] = hide }
     }
 
     suspend fun setSortMode(mode: SortMode) {
@@ -220,11 +230,13 @@ class SettingsRepository(private val context: Context) {
         val KEY_V3X = stringPreferencesKey("v3x_key")
         val KEY_ASTRA = stringPreferencesKey("astratorrent_key")
         val KEY_YGG = stringPreferencesKey("yggreborn_key")
+        val KEY_ZXX = stringPreferencesKey("zxxclub_key")
         val URL_C411 = stringPreferencesKey("c411_url")
         val URL_TR4KER = stringPreferencesKey("tr4ker_url")
         val URL_V3X = stringPreferencesKey("v3x_url")
         val URL_ASTRA = stringPreferencesKey("astratorrent_url")
         val URL_YGG = stringPreferencesKey("yggreborn_url")
+        val URL_ZXX = stringPreferencesKey("zxxclub_url")
         val ENABLED = stringSetPreferencesKey("enabled_trackers")
         val CUSTOM = stringPreferencesKey("custom_trackers")
         val FB_HOST = stringPreferencesKey("freebox_host")
@@ -238,6 +250,7 @@ class SettingsRepository(private val context: Context) {
         val IGNORED_UPDATE = stringPreferencesKey("ignored_update_version")
         val SORT_MODE = stringPreferencesKey("sort_mode")
         val TYPES = stringSetPreferencesKey("enabled_types")
+        val HIDE_ZERO_SEEDERS = booleanPreferencesKey("hide_zero_seeders")
         val VPN_ENABLED = booleanPreferencesKey("vpn_enabled")
         val VPN_ANSWERED = booleanPreferencesKey("vpn_prompt_answered")
         val VPN_CONFIG = stringPreferencesKey("vpn_config")

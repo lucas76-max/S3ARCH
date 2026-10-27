@@ -96,6 +96,8 @@ fun SetupScreen(
     var astraUrl by rememberSaveable { mutableStateOf(state.settings.astraTorrentUrl) }
     var yggKey by rememberSaveable { mutableStateOf(state.settings.yggRebornKey) }
     var yggUrl by rememberSaveable { mutableStateOf(state.settings.yggRebornUrl) }
+    var zxxKey by rememberSaveable { mutableStateOf(state.settings.zxxClubKey) }
+    var zxxUrl by rememberSaveable { mutableStateOf(state.settings.zxxClubUrl) }
     var host by rememberSaveable { mutableStateOf(state.settings.freeboxHost) }
     var folder by rememberSaveable { mutableStateOf(state.settings.freeboxDownloadDir) }
     var showAddTracker by remember { mutableStateOf(false) }
@@ -106,6 +108,7 @@ fun SetupScreen(
         Tracker.V3X -> v3xKey
         Tracker.ASTRATORRENT -> astraKey
         Tracker.YGG_REBORN -> yggKey
+        Tracker.ZXX_CLUB -> zxxKey
     }
 
     fun urlOf(tracker: Tracker): String = when (tracker) {
@@ -114,6 +117,7 @@ fun SetupScreen(
         Tracker.V3X -> v3xUrl
         Tracker.ASTRATORRENT -> astraUrl
         Tracker.YGG_REBORN -> yggUrl
+        Tracker.ZXX_CLUB -> zxxUrl
     }
 
     val chosen = Tracker.entries.filter { it.id in selectedTrackers }
@@ -136,6 +140,7 @@ fun SetupScreen(
                 Tracker.V3X to v3xKey,
                 Tracker.ASTRATORRENT to astraKey,
                 Tracker.YGG_REBORN to yggKey,
+                Tracker.ZXX_CLUB to zxxKey,
             ),
             mapOf(
                 Tracker.C411 to c411Url,
@@ -143,6 +148,7 @@ fun SetupScreen(
                 Tracker.V3X to v3xUrl,
                 Tracker.ASTRATORRENT to astraUrl,
                 Tracker.YGG_REBORN to yggUrl,
+                Tracker.ZXX_CLUB to zxxUrl,
             ),
         )
         vm.setEnabledTrackers(selectedTrackers)
@@ -278,6 +284,7 @@ fun SetupScreen(
                                                         Tracker.V3X -> v3xKey = value
                                                         Tracker.ASTRATORRENT -> astraKey = value
                                                         Tracker.YGG_REBORN -> yggKey = value
+                                                        Tracker.ZXX_CLUB -> zxxKey = value
                                                     }
                                                 },
                                                 onUrlChange = { value ->
@@ -287,6 +294,7 @@ fun SetupScreen(
                                                         Tracker.V3X -> v3xUrl = value
                                                         Tracker.ASTRATORRENT -> astraUrl = value
                                                         Tracker.YGG_REBORN -> yggUrl = value
+                                                        Tracker.ZXX_CLUB -> zxxUrl = value
                                                     }
                                                 },
                                                 onTest = {

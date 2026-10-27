@@ -60,6 +60,14 @@ enum class Tracker(
         docsHint = "En haut du site : API → votre passkey",
         logoUrl = "https://www.yggreborn.org/static/logo.svg",
         defaultLimit = 50,
+    ),
+    ZXX_CLUB(
+        id = "zxxclub",
+        label = "ZXX Club",
+        defaultUrl = "https://zxxclub.com/api/torznab",
+        keyHint = "Cle API ZXX Club (lecture & telechargement)",
+        docsHint = "Compte → API & Applications → cle de lecture",
+        logoUrl = "https://zxxclub.com/static/favicon.svg",
     );
 
     companion object {
@@ -331,6 +339,8 @@ data class AppSettings(
     val astraTorrentUrl: String = Tracker.ASTRATORRENT.defaultUrl,
     val yggRebornKey: String = "",
     val yggRebornUrl: String = Tracker.YGG_REBORN.defaultUrl,
+    val zxxClubKey: String = "",
+    val zxxClubUrl: String = Tracker.ZXX_CLUB.defaultUrl,
     val enabledTrackers: Set<String> = Tracker.entries.map { it.id }.toSet(),
     val customTrackers: List<CustomTracker> = emptyList(),
     val freeboxHost: String = "mafreebox.freebox.fr",
@@ -347,6 +357,8 @@ data class AppSettings(
     val sortMode: SortMode = SortMode.SIZE_ASC,
     /** Types de contenus a afficher ; ensemble vide = aucun filtre. */
     val enabledTypes: Set<String> = emptySet(),
+    /** Masque les resultats sans source (0 seeder). Actif par defaut. */
+    val hideZeroSeeders: Boolean = true,
     /** L'utilisateur a accepte l'acces hors du reseau local via le VPN de la box. */
     val vpnEnabled: Boolean = false,
     /** La proposition de VPN a deja ete acceptee ou refusee. */
@@ -364,6 +376,7 @@ data class AppSettings(
         Tracker.V3X -> v3xKey
         Tracker.ASTRATORRENT -> astraTorrentKey
         Tracker.YGG_REBORN -> yggRebornKey
+        Tracker.ZXX_CLUB -> zxxClubKey
     }
 
     fun urlFor(tracker: Tracker): String = when (tracker) {
@@ -372,6 +385,7 @@ data class AppSettings(
         Tracker.V3X -> v3xUrl
         Tracker.ASTRATORRENT -> astraTorrentUrl
         Tracker.YGG_REBORN -> yggRebornUrl
+        Tracker.ZXX_CLUB -> zxxClubUrl
     }
 
     /** Toutes les sources disponibles (integrees + tiers). */
@@ -410,4 +424,20 @@ data class AppSettings(
 
     val freeboxConfigured: Boolean
         get() = freeboxAppToken.isNotBlank()
+}
+
+/**
+ * Retire les resultats sans source (0 seeder) quand le reglage est actif.
+ *
+ * Tous les flux Torznab n'exposent pas l'attribut `seeders` : chez un tracker muet sur ce
+ * point, tous les resultats valent 0. Le filtre ne s'applique donc a un tracker que
+ * s'il publie au moins une valeur non nulle, pour ne jamais vider sa liste entiere.
+ */
+fun List<TorrentResult>.withoutZeroSeeders(hide: Boolean): List<TorrentResult> {
+    if (!hide) return this
+    val reporting = groupBy { it.trackerId }
+        .filterValues { list -> list.any { it.seeders > 0 } }
+        .keys
+    if (reporting.isEmpty()) return this
+    return filter { it.trackerId !in reporting || it.seeders > 0 }
 }

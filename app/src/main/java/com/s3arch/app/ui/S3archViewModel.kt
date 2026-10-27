@@ -166,6 +166,11 @@ class S3archViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { repo.setSortMode(mode) }
     }
 
+    /** Masque ou reaffiche les torrents sans seeder. */
+    fun setHideZeroSeeders(hide: Boolean) {
+        viewModelScope.launch { repo.setHideZeroSeeders(hide) }
+    }
+
     /** Filtre facultatif par type de contenu ; un ensemble vide affiche tout. */
     fun toggleType(type: MediaType) {
         val current = _state.value.settings.enabledTypes

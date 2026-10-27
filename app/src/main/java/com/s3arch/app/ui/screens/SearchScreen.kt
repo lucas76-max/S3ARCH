@@ -61,6 +61,7 @@ import com.s3arch.app.data.SortMode
 import com.s3arch.app.data.TorrentResult
 import com.s3arch.app.data.TrackerSource
 import com.s3arch.app.data.sortedFor
+import com.s3arch.app.data.withoutZeroSeeders
 import com.s3arch.app.ui.S3archViewModel
 import com.s3arch.app.ui.UiState
 import com.s3arch.app.ui.components.EmptyState
@@ -82,10 +83,14 @@ fun SearchScreen(state: UiState, vm: S3archViewModel) {
     } else {
         state.results.filter { it.mediaType.id in activeTypes }
     }
-    val visible = remember(filtered, state.settings.sortMode) {
-        filtered.sortedFor(state.settings.sortMode)
+    val withoutZero = remember(filtered, state.settings.hideZeroSeeders) {
+        filtered.withoutZeroSeeders(state.settings.hideZeroSeeders)
+    }
+    val visible = remember(withoutZero, state.settings.sortMode) {
+        withoutZero.sortedFor(state.settings.sortMode)
     }
     val hiddenByFilter = state.results.size - filtered.size
+    val hiddenBySeeders = filtered.size - withoutZero.size
 
     Column(
         modifier = Modifier
@@ -236,6 +241,14 @@ fun SearchScreen(state: UiState, vm: S3archViewModel) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+            if (hiddenBySeeders > 0) {
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "$hiddenBySeeders torrent(s) à 0 seeder masqué(s) (Réglages → Résultats)",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
 
         if (state.searching) {
@@ -261,12 +274,14 @@ fun SearchScreen(state: UiState, vm: S3archViewModel) {
 
         if (visible.isEmpty() && !state.searching) {
             if (state.searched) {
-                if (hiddenByFilter > 0) {
+                if (hiddenByFilter > 0 || hiddenBySeeders > 0) {
                     EmptyState(
                         icon = Icons.Rounded.Search,
-                        title = "Aucun résultat pour ce filtre",
-                        subtitle = "$hiddenByFilter résultat(s) masqué(s) par le filtre de types. " +
-                            "Ajustez-le dans les réglages ou désactivez-le.",
+                        title = "Aucun résultat affichable",
+                        subtitle = buildList {
+                            if (hiddenByFilter > 0) add("$hiddenByFilter masqué(s) par le filtre de types")
+                            if (hiddenBySeeders > 0) add("$hiddenBySeeders sans seeder")
+                        }.joinToString(" · ") + ". Ajustez les filtres dans les réglages.",
                     )
                 } else {
                     EmptyState(
