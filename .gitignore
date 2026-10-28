@@ -9,7 +9,9 @@
 .cxx
 local.properties
 app/build/
-# keystore de signature volontairement versionne (voir README)
+# Signature : le keystore et ses mots de passe ne doivent jamais etre versionnes.
+/keystore/
+keystore.properties
 logs/
 dist/
 .kotlin/

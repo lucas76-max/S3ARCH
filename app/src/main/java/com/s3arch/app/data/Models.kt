@@ -41,7 +41,7 @@ enum class Tracker(
         label = "V3X",
         defaultUrl = "https://api.v3x.club/torznab",
         keyHint = "Cle API V3X (scope torznab)",
-        docsHint = "Reglages → API → cle scope torznab",
+        docsHint = "Compte → Parametres → Integrations → cle Torznab",
         logoUrl = "https://v3x.club/icon.svg",
     ),
     ASTRATORRENT(
