@@ -102,7 +102,10 @@ class VlcProxyServerTest {
         val port = server.start { _, _ -> response(200, "MATROSKA") }
         val localPath = server.publish(source("film.mkv"))
 
-        assertEquals(200, server.probe(port, localPath))
+        // La sonde demande `bytes=0-0` : selon que la box honore Range ou non, le
+        // proxy répond 206 (tranche fabriquée) ou 200. Seul le succès compte ici.
+        val code = server.probe(port, localPath)
+        assertTrue("statut 2xx attendu, reçu $code", code in 200..299)
         server.stop()
     }
 
@@ -200,6 +203,27 @@ class VlcProxyServerTest {
 
         assertTrue("502 attendu : $answer", answer.startsWith("HTTP/1.1 502"))
         assertTrue("le motif doit remonter : $answer", answer.contains("access_denied"))
+        server.stop()
+    }
+
+    /**
+     * La Freebox renvoie parfois le fichier entier (200) alors que le lecteur demande
+     * une plage : sans 206, VLC reste bloque sur son indicateur de chargement.
+     */
+    @Test
+    fun `une plage est servie en 206 quand la box ignore Range`() {
+        val server = VlcProxyServer()
+        val port = server.start { _, _ -> response(200, "0123456789") }
+        val localPath = server.publish(source("film.mkv"))
+
+        val answer = get(port, localPath, range = "bytes=4-7")
+        val head = answer.substringBefore("\r\n\r\n")
+        val body = answer.substringAfter("\r\n\r\n")
+
+        assertTrue("206 attendu : $head", head.startsWith("HTTP/1.1 206"))
+        assertTrue("Content-Range attendu : $head", head.contains("Content-Range: bytes 4-7/10"))
+        assertTrue("taille attendue : $head", head.contains("Content-Length: 4"))
+        assertEquals("le debut du fichier ne doit pas etre renvoye", "4567", body)
         server.stop()
     }
 }

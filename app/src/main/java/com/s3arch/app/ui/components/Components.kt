@@ -1,5 +1,7 @@
 package com.s3arch.app.ui.components
 
+import com.s3arch.app.data.Tracker
+
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
@@ -311,16 +313,23 @@ fun LogoMark(size: Int = 52) {
 }
 
 /**
- * Logo distant d'un tracker (PNG ou SVG). L'initiale du tracker reste affichee
- * pendant le chargement et si le logo est introuvable, pour ne jamais laisser un vide.
+ * Logo d'un tracker, embarque dans l'APK (`res/raw`). L'initiale du tracker reste
+ * affichee pendant le chargement et si le logo est introuvable, pour ne jamais
+ * laisser un vide. Le decodeur SVG est fourni explicitement : sans lui, Coil affiche
+ * l'initiale a la place des logos vectoriels (V3X, YGG Reborn, ZXX Club).
  */
 @Composable
 fun TrackerLogo(
-    url: String?,
-    label: String,
+    tracker: Tracker,
     size: Int = 56,
     modifier: Modifier = Modifier,
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val imageLoader = androidx.compose.runtime.remember {
+        coil.ImageLoader.Builder(context)
+            .components { add(coil.decode.SvgDecoder.Factory()) }
+            .build()
+    }
     Box(
         modifier = modifier
             .size(size.dp)
@@ -329,21 +338,19 @@ fun TrackerLogo(
         contentAlignment = Alignment.Center,
     ) {
         Text(
-            text = label.trim().take(1).uppercase(),
+            text = tracker.label.trim().take(1).uppercase(),
             style = MaterialTheme.typography.titleLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        if (!url.isNullOrBlank()) {
-            AsyncImage(
-                model = ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current)
-                    .data(url)
-                    .crossfade(true)
-                    .build(),
-                contentDescription = label,
-                contentScale = ContentScale.Fit,
-                modifier = Modifier.fillMaxSize(),
-            )
-        }
+        AsyncImage(
+            model = ImageRequest.Builder(context)
+                .data(tracker.logoRes)
+                .build(),
+            imageLoader = imageLoader,
+            contentDescription = tracker.label,
+            contentScale = ContentScale.Fit,
+            modifier = Modifier.fillMaxSize(),
+        )
     }
 }
 

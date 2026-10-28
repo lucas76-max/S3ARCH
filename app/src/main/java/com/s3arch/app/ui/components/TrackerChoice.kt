@@ -58,7 +58,7 @@ fun TrackerChoice(
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Box {
-                TrackerLogo(url = tracker.logoUrl, label = tracker.label, size = 64)
+                TrackerLogo(tracker = tracker, size = 64)
                 if (selected) {
                     Box(
                         modifier = Modifier

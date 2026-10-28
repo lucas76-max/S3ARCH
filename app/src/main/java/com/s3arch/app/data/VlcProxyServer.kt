@@ -174,14 +174,20 @@ class VlcProxyServer {
                     return
                 }
 
-                response.use { upstream -> relay(client, upstream, stream, method) }
+                response.use { upstream -> relay(client, upstream, stream, method, range) }
             } catch (e: Exception) {
                 runCatching { writeError(client, 500, e.message ?: "Erreur du proxy") }
             }
         }
     }
 
-    private fun relay(socket: Socket, upstream: Response, source: StreamSource, method: String) {
+    private fun relay(
+        socket: Socket,
+        upstream: Response,
+        source: StreamSource,
+        method: String,
+        range: String?,
+    ) {
         val started = System.currentTimeMillis()
         val out = BufferedOutputStream(socket.getOutputStream())
         val body = upstream.body
@@ -208,20 +214,47 @@ class VlcProxyServer {
 
         val contentType = upstreamType.takeIf { it.isNotBlank() && !it.startsWith("text/") }
             ?: contentTypeFor(source.name)
-        val contentRange = upstream.header("Content-Range")
+        val upstreamRange = upstream.header("Content-Range")
+        val total = upstreamRange?.substringAfterLast('/')?.toLongOrNull()
+            ?: body?.contentLength()?.takeIf { it >= 0L }
+        val requested = parseRange(range)
+
+        // Certains firmwares Freebox ignorent l'en-tete `Range` et renvoient tout le
+        // fichier en 200. VLC croyait alors recevoir la fin du fichier et restait bloque
+        // sur son indicateur de chargement (impossible de lire l'index du MKV).
+        // On fabrique donc la tranche demandee : 206 + Content-Range exacts, et les
+        // octets precedents sont consommes puis jetes.
+        val slice: Pair<Long, Long>? =
+            if (requested != null && upstream.code == 200 && total != null && total > 0L) {
+                val start = requested.first.coerceIn(0L, total - 1)
+                val last = (requested.second ?: (total - 1)).coerceIn(start, total - 1)
+                start to (last - start + 1)
+            } else {
+                null
+            }
 
         // On annonce **exactement** ce que la Freebox annonce. Inventer une taille
         // (l'ancien repli sur `source.size`) promettait plus d'octets qu'il n'en arrivait
         // quand la box repondait autrement : le lecteur restait bloque en chargement.
         // Sans longueur connue, on passe en chunked, que VLC et Media3 gerent.
-        val contentLength = body?.contentLength() ?: -1L
-        val chunked = contentLength < 0
+        val contentLength = when {
+            slice != null -> slice.second
+            else -> body?.contentLength() ?: -1L
+        }
+        val chunked = slice == null && contentLength < 0
 
         val status = when {
+            slice != null -> "206 Partial Content"
             upstream.code == 416 -> "416 Range Not Satisfiable"
             upstream.code == 206 -> "206 Partial Content"
             upstream.isSuccessful -> "200 OK"
             else -> "${upstream.code} ${upstream.message.ifBlank { "Erreur" }}"
+        }
+
+        val contentRange = if (slice != null) {
+            "bytes ${slice.first}-${slice.first + slice.second - 1}/$total"
+        } else {
+            upstreamRange
         }
 
         val headers = buildString {
@@ -236,7 +269,7 @@ class VlcProxyServer {
             if (chunked) {
                 append("Transfer-Encoding: chunked\r\n")
             } else {
-                append("Content-Length: ").append(contentLength).append("\r\n")
+                append("Content-Length: ").append(contentLength.coerceAtLeast(0L)).append("\r\n")
             }
             append("\r\n")
         }
@@ -247,12 +280,17 @@ class VlcProxyServer {
             logSent(source, status, 0, started, chunked)
             return
         }
-        val stream: InputStream = body?.byteStream() ?: return
+        val upstreamStream: InputStream = body?.byteStream() ?: return
         var sent = 0L
-        stream.use { input ->
+        upstreamStream.use { stream ->
+            if (slice != null && slice.first > 0) skipFully(stream, slice.first)
+            val limit = slice?.second ?: -1L
+            var remaining = limit
             val buffer = ByteArray(64 * 1024)
-            while (true) {
-                val read = input.read(buffer)
+            while (limit < 0 || remaining > 0) {
+                val wanted = if (limit < 0) buffer.size else minOf(buffer.size.toLong(), remaining).toInt()
+                if (wanted <= 0) break
+                val read = stream.read(buffer, 0, wanted)
                 if (read < 0) break
                 if (read == 0) continue
                 if (chunked) {
@@ -263,6 +301,7 @@ class VlcProxyServer {
                     out.write(buffer, 0, read)
                 }
                 sent += read
+                if (limit >= 0) remaining -= read
                 out.flush()
             }
         }
@@ -272,6 +311,27 @@ class VlcProxyServer {
         }
         runCatching { socket.shutdownOutput() }
         logSent(source, status, sent, started, chunked)
+    }
+
+    /** Analyse `bytes=debut-fin` ; `fin` peut etre absente. */
+    private fun parseRange(header: String?): Pair<Long, Long?>? {
+        val value = header?.trim().orEmpty()
+        if (!value.startsWith("bytes=", ignoreCase = true)) return null
+        val spec = value.substringAfter('=').substringBefore(',').trim()
+        val start = spec.substringBefore('-').trim().toLongOrNull() ?: return null
+        val end = spec.substringAfter('-', "").trim().toLongOrNull()
+        return start to end
+    }
+
+    /** Consomme [count] octets du flux amont (le saut est parfois partiel). */
+    private fun skipFully(input: InputStream, count: Long) {
+        var left = count
+        val buffer = ByteArray(64 * 1024)
+        while (left > 0) {
+            val read = input.read(buffer, 0, minOf(buffer.size.toLong(), left).toInt())
+            if (read < 0) return
+            left -= read
+        }
     }
 
     private fun logSent(source: StreamSource, status: String, sent: Long, started: Long, chunked: Boolean) {

@@ -118,20 +118,13 @@ fun WaveProgress(
         val filled = width * progress.coerceIn(0f, 1f)
         if (filled <= 0f) return@Canvas
 
-        drawRect(
-            brush = Brush.horizontalGradient(
-                listOf(color, color.copy(alpha = 0.78f), color),
-                startX = 0f,
-                endX = filled,
-            ),
-            topLeft = Offset(0f, 0f),
-            size = Size(filled, h),
-        )
-
+        // Plus de remplissage plein : la vague elle-meme indique l'avancement.
+        // L'ancien rectangle coloré se superposait aux sinusoides et donnait
+        // l'impression de deux barres de progression empilees.
         drawPath(
             path = wave(startX = 0f, endX = filled, offset = phase, waveHeight = amplitude),
-            color = waveColor.copy(alpha = 0.30f),
-            style = Stroke(width = h * 0.34f),
+            color = waveColor.copy(alpha = 0.55f),
+            style = Stroke(width = h * 0.46f),
         )
         drawPath(
             path = wave(
@@ -140,8 +133,8 @@ fun WaveProgress(
                 offset = phase + (Math.PI / 2.4).toFloat(),
                 waveHeight = amplitude * 0.7f,
             ),
-            color = waveColor.copy(alpha = 0.18f),
-            style = Stroke(width = h * 0.22f),
+            color = waveColor.copy(alpha = 0.30f),
+            style = Stroke(width = h * 0.30f),
         )
     }
 }

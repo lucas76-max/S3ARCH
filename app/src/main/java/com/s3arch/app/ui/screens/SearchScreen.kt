@@ -139,6 +139,27 @@ fun SearchScreen(state: UiState, vm: S3archViewModel) {
                 keyboardActions = KeyboardActions(onSearch = { vm.search(query) }),
             )
 
+            AnimatedVisibility(visible = state.searching) {
+                Column {
+                    Spacer(Modifier.height(12.dp))
+                    LinearProgressIndicator(
+                        progress = { state.searchProgress },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(6.dp),
+                        color = MaterialTheme.colorScheme.primary,
+                        trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "Recherche… ${(state.searchProgress * state.searchTotal + 0.5f).toInt()}" +
+                            " / ${state.searchTotal} tracker(s)",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+
             Spacer(Modifier.height(12.dp))
 
             Row(

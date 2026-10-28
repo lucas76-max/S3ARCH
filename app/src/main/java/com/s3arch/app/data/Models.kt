@@ -1,5 +1,6 @@
 package com.s3arch.app.data
 
+import com.s3arch.app.R
 import kotlinx.serialization.Serializable
 import java.time.Instant
 import java.time.LocalDateTime
@@ -15,8 +16,8 @@ enum class Tracker(
     val defaultUrl: String,
     val keyHint: String,
     val docsHint: String,
-    /** Logo affiche sur l'ecran de choix des trackers du premier lancement. */
-    val logoUrl: String,
+    /** Logo embarqué dans l'APK (res/raw), affiche hors ligne. */
+    val logoRes: Int,
     /** Nombre de resultats demandes (YGG Reborn plafonne a 50). */
     val defaultLimit: Int = 100,
 ) {
@@ -26,7 +27,7 @@ enum class Tracker(
         defaultUrl = "https://c411.org/api",
         keyHint = "Cle API C411",
         docsHint = "Profil → Parametres → cle API",
-        logoUrl = "https://c411.org/images/logo-md.png",
+        logoRes = R.raw.tracker_c411,
     ),
     TR4KER(
         id = "tr4ker",
@@ -34,7 +35,7 @@ enum class Tracker(
         defaultUrl = "https://tr4ker.net/api/torznab",
         keyHint = "Cle API TR4KER",
         docsHint = "Mon compte → Parametres → cle API",
-        logoUrl = "https://styles.redditmedia.com/t5_khpdg6/styles/communityIcon_gyvkrjzyydwh1.png?width=128&frame=1&auto=webp&s=ce0ee2f375d9c7440fc81401d0a4e6779920aa39",
+        logoRes = R.raw.tracker_tr4ker,
     ),
     V3X(
         id = "v3x",
@@ -42,7 +43,7 @@ enum class Tracker(
         defaultUrl = "https://api.v3x.club/torznab",
         keyHint = "Cle API V3X (scope torznab)",
         docsHint = "Compte → Parametres → Integrations → cle Torznab",
-        logoUrl = "https://v3x.club/icon.svg",
+        logoRes = R.raw.tracker_v3x,
     ),
     ASTRATORRENT(
         id = "astratorrent",
@@ -50,7 +51,7 @@ enum class Tracker(
         defaultUrl = "https://astratorrent.la/api/torznab.php",
         keyHint = "Cle API AstraTorrent",
         docsHint = "Mon cockpit → Seedbox & *Arr → cle API",
-        logoUrl = "https://astratorrent.la/assets/favicon.png",
+        logoRes = R.raw.tracker_astra,
     ),
     YGG_REBORN(
         id = "ygg",
@@ -58,7 +59,7 @@ enum class Tracker(
         defaultUrl = "https://www.yggreborn.org/api",
         keyHint = "Passkey API YGG Reborn",
         docsHint = "En haut du site : API → votre passkey",
-        logoUrl = "https://www.yggreborn.org/static/logo.svg",
+        logoRes = R.raw.tracker_ygg,
         defaultLimit = 50,
     ),
     ZXX_CLUB(
@@ -67,7 +68,7 @@ enum class Tracker(
         defaultUrl = "https://zxxclub.com/api/torznab",
         keyHint = "Cle API ZXX Club (lecture & telechargement)",
         docsHint = "Compte → API & Applications → cle de lecture",
-        logoUrl = "https://zxxclub.com/static/favicon.svg",
+        logoRes = R.raw.tracker_zxx,
     );
 
     companion object {

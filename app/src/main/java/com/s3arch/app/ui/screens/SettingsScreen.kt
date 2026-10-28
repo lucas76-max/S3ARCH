@@ -1,5 +1,14 @@
 package com.s3arch.app.ui.screens
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material.icons.rounded.Clear
+import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.UploadFile
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import com.s3arch.app.data.KeyImport
+
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -153,6 +162,20 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
         )
     }
 
+    var settingsQuery by rememberSaveable { mutableStateOf("") }
+
+    /**
+     * Un reglage reste affiche si le filtre est vide, s'il est contenu dans ses libelles,
+     * ou si tous les mots saisis y figurent (recherche « couleur accent » par exemple).
+     */
+    fun show(haystack: String): Boolean {
+        val needle = settingsQuery.trim().lowercase()
+        if (needle.isEmpty()) return true
+        if (haystack.contains(needle)) return true
+        val words = needle.split(' ').filter { it.length >= 2 }
+        return words.isNotEmpty() && words.all { haystack.contains(it) }
+    }
+
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -161,6 +184,34 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         item {
+            OutlinedTextField(
+                value = settingsQuery,
+                onValueChange = { settingsQuery = it },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
+                placeholder = { Text("Rechercher un réglage…") },
+                leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
+                trailingIcon = {
+                    if (settingsQuery.isNotEmpty()) {
+                        IconButton(onClick = { settingsQuery = "" }) {
+                            Icon(Icons.Rounded.Clear, contentDescription = "Effacer")
+                        }
+                    }
+                },
+                singleLine = true,
+                shape = RoundedCornerShape(26.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    focusedBorderColor = MaterialTheme.colorScheme.primary,
+                    unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
+                ),
+            )
+        }
+
+        if (show("réglages reglages parametres preferences")) {
+        item {
             ScreenHeader(
                 title = "Réglages",
                 subtitle = "Clés API, trackers tiers et Freebox",
@@ -168,7 +219,9 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
                 icon = Icons.Rounded.Settings,
             )
         }
+        }
 
+        if (show("trackers trackers cles api logos c411 tr4ker v3x astratorrent ygg zxx club")) {
         item {
             SectionCard(
                 modifier = Modifier.padding(horizontal = 16.dp),
@@ -204,8 +257,10 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
                 }
             }
         }
+        }
 
         if (state.settings.enabledTrackers.isNotEmpty()) {
+            if (show("clés api cles api c411 tr4ker v3x astratorrent ygg zxx club")) {
             item {
                 SectionCard(
                     modifier = Modifier.padding(horizontal = 16.dp),
@@ -267,8 +322,80 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
                     }
                 }
             }
+            }
         }
 
+        if (show("importer des clés importer import fichier texte cles api txt")) {
+        item {
+            SectionCard(
+                modifier = Modifier.padding(horizontal = 16.dp),
+                title = "Importer des clés",
+                subtitle = "Un fichier texte évite de ressaisir chaque clé API.",
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        "Format attendu : une ligne par tracker, « NOM = clé ». Noms reconnus : " +
+                            "C411, TR4KER, V3X, ASTRATORRENT, YGG_REBORN, ZXX_CLUB. " +
+                            "Le séparateur « : » fonctionne aussi et les lignes commençant par " +
+                            "« # » sont ignorées.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(
+                            "V3X = ma-cle\nC411 = ma-cle\nYGG_REBORN = ma-passkey",
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 11.sp,
+                            ),
+                            modifier = Modifier.padding(12.dp),
+                        )
+                    }
+                    val importer = rememberLauncherForActivityResult(
+                        contract = ActivityResultContracts.OpenDocument(),
+                    ) { uri ->
+                        if (uri != null) {
+                            val text = runCatching {
+                                context.contentResolver.openInputStream(uri)
+                                    ?.bufferedReader()
+                                    ?.use { it.readText() }
+                            }.getOrNull()
+                            val parsed = runCatching { KeyImport.parse(text.orEmpty()) }
+                                .getOrDefault(emptyList())
+                            if (parsed.isEmpty()) {
+                                vm.message("Aucune clé reconnue dans ce fichier")
+                            } else {
+                                parsed.forEach { entry -> setKey(entry.tracker, entry.key) }
+                                vm.saveApiKeys(
+                                    Tracker.entries.associateWith { keyOf(it) },
+                                    Tracker.entries.associateWith { urlOf(it) },
+                                )
+                            }
+                        }
+                    }
+                    OutlinedButton(
+                        onClick = { importer.launch(arrayOf("text/plain", "*/*")) },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(50),
+                    ) {
+                        Icon(
+                            Icons.Rounded.UploadFile,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Spacer(Modifier.size(8.dp))
+                        Text("Choisir un fichier .txt")
+                    }
+                }
+            }
+        }
+        }
+
+        if (show("trackers tiers tracker tiers torznab personnalise endpoint")) {
         item {
             SectionCard(
                 modifier = Modifier.padding(horizontal = 16.dp),
@@ -305,7 +432,9 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
                 }
             }
         }
+        }
 
+        if (show("types de contenus types contenus films series musique ebooks applications jeux xxx autres filtre")) {
         item {
             SectionCard(
                 modifier = Modifier.padding(horizontal = 16.dp),
@@ -342,7 +471,9 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
                 }
             }
         }
+        }
 
+        if (show("résultats resultats seeder torrents filtre masquer")) {
         item {
             SectionCard(
                 modifier = Modifier.padding(horizontal = 16.dp),
@@ -377,7 +508,9 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
                 }
             }
         }
+        }
 
+        if (show("freebox freebox adresse dossier telechargement session autoriser connecter")) {
         item {
             SectionCard(
                 modifier = Modifier.padding(horizontal = 16.dp),
@@ -448,8 +581,10 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
                 }
             }
         }
+        }
 
         if (state.needsSettingsRight) {
+            if (show("droits freebox autorisation settings parametres")) {
             item {
                 FreeboxRightsCard(
                     state = state,
@@ -458,8 +593,10 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
                     modifier = Modifier.padding(horizontal = 16.dp),
                 )
             }
+            }
         }
 
+        if (show("accès hors du réseau local vpn wireguard hors reseau local distance tunnel")) {
         item {
             SectionCard(
                 modifier = Modifier.padding(horizontal = 16.dp),
@@ -473,7 +610,9 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
                 )
             }
         }
+        }
 
+        if (show("apparence apparence couleurs dynamiques material you accent palette theme")) {
         item {
             val dynamicSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
             val dynamicActive = dynamicSupported && state.settings.dynamicColor
@@ -553,7 +692,9 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
                 }
             }
         }
+        }
 
+        if (show("journaux journaux logs journal copier effacer diagnostic")) {
         item {
             val logs by AppLog.entries.collectAsState()
             val clipboard = LocalClipboardManager.current
@@ -621,7 +762,9 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
                 }
             }
         }
+        }
 
+        if (show("a propos about version github logo application avertissement")) {
         item {
             Surface(
                 modifier = Modifier
@@ -697,6 +840,7 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
                     )
                 }
             }
+        }
         }
     }
 }

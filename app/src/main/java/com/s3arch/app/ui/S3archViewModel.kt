@@ -10,6 +10,8 @@ import androidx.lifecycle.viewModelScope
 import com.s3arch.app.data.AppSettings
 import com.s3arch.app.data.FreeboxApi
 import com.s3arch.app.data.FreeboxException
+import com.s3arch.app.data.KeyImport
+import com.s3arch.app.data.PlaybackKeepAlive
 import com.s3arch.app.data.FreeboxTask
 import com.s3arch.app.data.MediaType
 import com.s3arch.app.data.SettingsRepository
@@ -43,6 +45,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.util.concurrent.atomic.AtomicInteger
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Socket
@@ -59,6 +62,9 @@ data class UiState(
     val settings: AppSettings = AppSettings(),
     val query: String = "",
     val searching: Boolean = false,
+    /** Nombre de trackers ayant repondu, rapporte au total interroge (barre de chargement). */
+    val searchProgress: Float = 0f,
+    val searchTotal: Int = 0,
     val searched: Boolean = false,
     val results: List<TorrentResult> = emptyList(),
     val trackerErrors: Map<String, String> = emptyMap(),
@@ -203,11 +209,25 @@ class S3archViewModel(app: Application) : AndroidViewModel(app) {
         }
 
         viewModelScope.launch {
-            _state.update { it.copy(searching = true, query = term, trackerErrors = emptyMap()) }
+            _state.update {
+                it.copy(
+                    searching = true,
+                    query = term,
+                    trackerErrors = emptyMap(),
+                    searchProgress = 0f,
+                    searchTotal = sources.size,
+                )
+            }
+            // Chaque tracker qui repond fait avancer la barre, meme s'il ne renvoie
+            // aucun resultat : la progression reflete les flux réellement clotures.
+            val finished = AtomicInteger(0)
             val outcomes = coroutineScope {
                 sources.map { source ->
                     async {
-                        source to runCatching { torznab.search(source, term) }
+                        val outcome = runCatching { torznab.search(source, term) }
+                        val done = finished.incrementAndGet()
+                        _state.update { it.copy(searchProgress = done.toFloat() / sources.size) }
+                        source to outcome
                     }
                 }.awaitAll()
             }
@@ -424,8 +444,26 @@ class S3archViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Lit le media dans VLC (le lecteur integre est le choix par defaut). */
     fun playWithVlc(context: Context, download: TrackedDownload) = launchPlayback(download) { target ->
+        // VLC passe au premier plan : sans service de premier plan, Android peut geler
+        // le processus et le proxy local cesse d'envoyer des octets (VLC tourne alors
+        // indefiniment).
+        PlaybackKeepAlive.start(context)
         if (!VlcLauncher.play(context, target.url, target.title)) {
             message("VLC n'est pas installé : utilisez « Lire dans S3ARCH »")
+        }
+    }
+
+    /** Importe des cles API depuis un fichier texte au format « NOM = cle ». */
+    fun importApiKeys(text: String) {
+        val keys = KeyImport.asMap(text)
+        if (keys.isEmpty()) {
+            message("Aucune clé reconnue dans ce fichier")
+            return
+        }
+        viewModelScope.launch {
+            val settings = _state.value.settings
+            repo.saveApiKeys(keys, keys.keys.associateWith { settings.urlFor(it) })
+            message("${keys.size} clé(s) importée(s)")
         }
     }
 
