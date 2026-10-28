@@ -185,7 +185,8 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
             .fillMaxSize()
             .statusBarsPadding()
             .background(MaterialTheme.colorScheme.background),
-        contentPadding = PaddingValues(bottom = 32.dp),
+        // Marge sous la barre d'etat : la recherche ne colle plus a l'heure et aux icones.
+        contentPadding = PaddingValues(top = 16.dp, bottom = 32.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         item {

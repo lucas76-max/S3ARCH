@@ -64,7 +64,7 @@ class SettingsRepository(private val context: Context) {
                 ?.filter { it == TARGET_PHONE || it == TARGET_FREEBOX }
                 ?.toSet()
                 ?.takeIf { it.isNotEmpty() }
-                ?: setOf(TARGET_FREEBOX),
+                ?: setOf(TARGET_PHONE),
             phoneTreeUri = prefs[PHONE_TREE] ?: "",
             seedAfterDownload = prefs[SEED_AFTER] ?: false,
         )
@@ -76,7 +76,7 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setDownloadTargets(targets: Set<String>) {
         val clean = targets.filter { it == TARGET_PHONE || it == TARGET_FREEBOX }.toSet()
-        context.dataStore.edit { it[TARGETS_DOWNLOAD] = clean.ifEmpty { setOf(TARGET_FREEBOX) } }
+        context.dataStore.edit { it[TARGETS_DOWNLOAD] = clean.ifEmpty { setOf(TARGET_PHONE) } }
     }
 
     suspend fun setPhoneTreeUri(uri: String) {

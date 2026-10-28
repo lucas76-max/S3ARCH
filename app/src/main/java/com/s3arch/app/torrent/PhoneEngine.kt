@@ -47,6 +47,11 @@ class PhoneEngine private constructor(context: Context) {
     val downloads: StateFlow<List<PhoneDownload>> = _downloads.asStateFlow()
 
     private val jobs = ConcurrentHashMap<String, Job>()
+    /**
+     * Identifiant de la session en cours par telechargement. Une session annulee
+     * (pause, suppression) ne doit plus toucher a l'etat affiche.
+     */
+    private val runs = ConcurrentHashMap<String, Long>()
     private val torrentBytes = ConcurrentHashMap<String, ByteArray>()
 
     @Volatile private var storage: PhoneStorage = PhoneStorageFactory.fallback(appContext)
@@ -118,6 +123,9 @@ class PhoneEngine private constructor(context: Context) {
 
     fun pause(id: String) {
         val record = current(id)
+        // Invalider la session avant de l'annuler : ses derniers callbacks ne doivent
+        // pas ecraser l'etat « en pause » ni faire repartir la progression.
+        runs.remove(id)
         jobs.remove(id)?.cancel()
         if (record != null && record.isSeeding) {
             // Arreter un partage ne doit pas remettre le fichier en « en pause ».
@@ -144,6 +152,7 @@ class PhoneEngine private constructor(context: Context) {
     }
 
     fun remove(id: String, deleteFiles: Boolean) {
+        runs.remove(id)
         jobs.remove(id)?.cancel()
         val record = current(id)
         if (deleteFiles && record != null) {
@@ -186,22 +195,46 @@ class PhoneEngine private constructor(context: Context) {
     }
 
     private fun start(id: String) {
-        jobs.remove(id)?.cancel()
-        val record = current(id) ?: return
+        val previous = jobs.remove(id)
+        previous?.cancel()
+        val token = (runs[id] ?: 0L) + 1L
+        runs[id] = token
+        fun isCurrent(): Boolean = runs[id] == token
+
         val job = scope.launch {
+            // Attendre la fin reelle de la session precedente evite deux moteurs qui
+            // ecrivent dans les memes fichiers quand on enchaine pause puis lecture.
+            previous?.join()
+            if (!isCurrent()) return@launch
+            val record = current(id) ?: return@launch
             try {
                 when (val source = sourceOf(record)) {
-                    is PhoneSource.Magnet -> downloadTorrent(id, source, verifyExisting = record.doneBytes > 0L)
-                    is PhoneSource.TorrentFile -> downloadTorrent(id, source, verifyExisting = record.doneBytes > 0L)
-                    is PhoneSource.Link -> resolveLink(id, source)
+                    is PhoneSource.Magnet -> downloadTorrent(
+                        id,
+                        source,
+                        verifyExisting = record.doneBytes > 0L,
+                        isCurrent = { isCurrent() },
+                    )
+                    is PhoneSource.TorrentFile -> downloadTorrent(
+                        id,
+                        source,
+                        verifyExisting = record.doneBytes > 0L,
+                        isCurrent = { isCurrent() },
+                    )
+                    is PhoneSource.Link -> resolveLink(id, source) { isCurrent() }
                     null -> fail(id, "Source illisible : magnet, lien ou fichier .torrent attendu")
                 }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                fail(id, e.message?.takeIf { it.isNotBlank() } ?: e.javaClass.simpleName)
+                if (isCurrent()) {
+                    fail(id, e.message?.takeIf { it.isNotBlank() } ?: e.javaClass.simpleName)
+                }
             } finally {
-                jobs.remove(id)
+                if (isCurrent()) {
+                    jobs.remove(id)
+                    runs.remove(id, token)
+                }
             }
         }
         jobs[id] = job
@@ -220,6 +253,7 @@ class PhoneEngine private constructor(context: Context) {
         id: String,
         source: PhoneSource,
         verifyExisting: Boolean,
+        isCurrent: () -> Boolean = { true },
     ) {
         val meta = when (source) {
             is PhoneSource.TorrentFile -> withContext(Dispatchers.IO) { TorrentMeta.parse(source.bytes) }
@@ -287,7 +321,7 @@ class PhoneEngine private constructor(context: Context) {
             donePieces = done,
             seeding = seeding,
             onProgress = { bytes, rate, peers, uploaded ->
-                update(id) {
+                if (isCurrent()) update(id) {
                     if (!it.isActive) it
                     else it.copy(
                         doneBytes = bytes,
@@ -299,7 +333,7 @@ class PhoneEngine private constructor(context: Context) {
                 }
             },
             onComplete = { total ->
-                update(id) {
+                if (isCurrent()) update(id) {
                     it.copy(
                         state = if (seeding) PhoneDownload.STATE_SEEDING else PhoneDownload.STATE_DONE,
                         doneBytes = total,
@@ -320,7 +354,7 @@ class PhoneEngine private constructor(context: Context) {
         val complete = done.all { it }
         // Un partage arrete volontairement garde son etat « Termine ».
         val settled = current(id)?.let { it.isDone || it.isSeeding || it.isPaused } == true
-        if (!complete && !settled && current(id)?.isActive == true) {
+        if (isCurrent() && !complete && !settled && current(id)?.isActive == true) {
             fail(id, "Téléchargement interrompu : plus aucun pair disponible")
         }
     }
@@ -338,10 +372,19 @@ class PhoneEngine private constructor(context: Context) {
 
     // ------------------------------------------------------------------ liens directs
 
-    private suspend fun resolveLink(id: String, source: PhoneSource.Link) {
+    private suspend fun resolveLink(
+        id: String,
+        source: PhoneSource.Link,
+        isCurrent: () -> Boolean = { true },
+    ) {
         val url = source.url
         if (isTorrentUrl(url) || looksLikeTorrent(url)) {
-            downloadTorrent(id, PhoneSource.Link(url, source.suggestedName), verifyExisting = false)
+            downloadTorrent(
+                id,
+                PhoneSource.Link(url, source.suggestedName),
+                verifyExisting = false,
+                isCurrent = isCurrent,
+            )
             return
         }
         runDirect(id, url, source.suggestedName)

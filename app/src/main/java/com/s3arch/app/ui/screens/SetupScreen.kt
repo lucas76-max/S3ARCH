@@ -58,6 +58,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -192,17 +193,21 @@ fun SetupScreen(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    // Fond opaque des le bord haut : le bandeau couvre la barre d'etat
+                    // au lieu de laisser une bande vide au-dessus du logo.
+                    .clip(RoundedCornerShape(bottomStart = 38.dp, bottomEnd = 38.dp))
+                    .background(MaterialTheme.colorScheme.surfaceContainerLow)
                     .background(
                         Brush.verticalGradient(
                             listOf(
-                                MaterialTheme.colorScheme.primary.copy(alpha = 0.16f),
-                                MaterialTheme.colorScheme.secondary.copy(alpha = 0.06f),
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.30f),
+                                MaterialTheme.colorScheme.secondary.copy(alpha = 0.12f),
                                 Color.Transparent,
                             ),
                         ),
                     )
                     .statusBarsPadding()
-                    .padding(horizontal = 24.dp, vertical = 14.dp),
+                    .padding(start = 24.dp, end = 24.dp, top = 18.dp, bottom = 22.dp),
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     LogoMark(56)

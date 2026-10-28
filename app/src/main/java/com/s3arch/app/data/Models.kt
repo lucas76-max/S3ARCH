@@ -377,7 +377,9 @@ data class AppSettings(
     /** IP locale de la box, utilisee a travers le tunnel hors du reseau local. */
     val freeboxLanIp: String = "",
     /** Destinations autorisees : "phone" (telephone) et/ou "freebox". */
-    val downloadTargets: Set<String> = setOf(TARGET_FREEBOX),
+    // Par defaut on telecharge sur le telephone : la Freebox ne s'ajoute que si on la
+    // choisit explicitement, au premier lancement ou dans les reglages.
+    val downloadTargets: Set<String> = setOf(TARGET_PHONE),
     /** Dossier choisi sur le telephone (SAF). Vide = dossier par defaut. */
     val phoneTreeUri: String = "",
     /** Continue a partager le torrent apres le telechargement (consomme batterie). */
