@@ -80,6 +80,7 @@ import com.s3arch.app.ui.components.AddTrackerDialog
 import com.s3arch.app.ui.components.CustomTrackerRow
 import com.s3arch.app.ui.components.FreeboxRightsCard
 import com.s3arch.app.ui.components.LogoMark
+import com.s3arch.app.ui.components.PhoneSetupCard
 import com.s3arch.app.ui.components.ScreenHeader
 import com.s3arch.app.ui.components.SectionCard
 import com.s3arch.app.ui.components.StatusDot
@@ -219,6 +220,17 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
                 icon = Icons.Rounded.Settings,
             )
         }
+        }
+
+        // Telechargement direct sur l'appareil : dossier, batterie, notifications.
+        if (show("téléchargement téléphone telephone dossier stockage espace batterie notifications destination optimisation")) {
+            item {
+                PhoneSetupCard(
+                    state = state,
+                    vm = vm,
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                )
+            }
         }
 
         if (show("trackers trackers cles api logos c411 tr4ker v3x astratorrent ygg zxx club")) {

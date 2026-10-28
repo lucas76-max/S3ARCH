@@ -9,6 +9,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -31,7 +32,9 @@ import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.CloudDownload
 import androidx.compose.material.icons.rounded.ErrorOutline
+import androidx.compose.material.icons.rounded.PhoneAndroid
 import androidx.compose.material.icons.rounded.Router
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -54,11 +57,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.s3arch.app.data.FreeboxPaths
+import com.s3arch.app.data.TARGET_FREEBOX
+import com.s3arch.app.data.TARGET_PHONE
 import com.s3arch.app.data.Tracker
 import com.s3arch.app.data.TrackerSource
 import com.s3arch.app.ui.FreeboxStatus
@@ -66,6 +72,7 @@ import com.s3arch.app.ui.S3archViewModel
 import com.s3arch.app.ui.UiState
 import com.s3arch.app.ui.components.AddTrackerDialog
 import com.s3arch.app.ui.components.LogoMark
+import com.s3arch.app.ui.components.PhoneSetupCard
 import com.s3arch.app.ui.components.SectionCard
 import com.s3arch.app.ui.components.TrackerKeyEditor
 import com.s3arch.app.ui.components.TrackerChoice
@@ -102,6 +109,7 @@ fun SetupScreen(
     var host by rememberSaveable { mutableStateOf(state.settings.freeboxHost) }
     var folder by rememberSaveable { mutableStateOf(state.settings.freeboxDownloadDir) }
     var showAddTracker by remember { mutableStateOf(false) }
+    var selectedTargets by remember { mutableStateOf(state.settings.downloadTargets) }
 
     fun keyOf(tracker: Tracker): String = when (tracker) {
         Tracker.C411 -> c411Key
@@ -127,8 +135,9 @@ fun SetupScreen(
     val connected = state.setup.status == FreeboxStatus.Connected
     val busy = state.setup.status == FreeboxStatus.Connecting ||
         state.setup.status == FreeboxStatus.WaitingApproval
+    val phoneSelected = TARGET_PHONE in selectedTargets
     val progress by animateFloatAsState(
-        targetValue = step / 2f,
+        targetValue = step / 3f,
         animationSpec = spring(),
         label = "setup-progress",
     )
@@ -182,7 +191,7 @@ fun SetupScreen(
                     Column {
                         Text("S3ARCH", style = MaterialTheme.typography.displaySmall)
                         Text(
-                            "Recherche · Freebox · lecteur intégré",
+                            "Recherche · Téléphone · Freebox",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -190,9 +199,10 @@ fun SetupScreen(
                 }
                 Spacer(Modifier.height(20.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    StepPill(index = 1, label = "Trackers", active = step == 0)
-                    StepPill(index = 2, label = "Clés API", active = step == 1)
-                    StepPill(index = 3, label = "Freebox", active = step == 2)
+                    StepPill(index = 1, label = "Destination", active = step == 0)
+                    StepPill(index = 2, label = "Trackers", active = step == 1)
+                    StepPill(index = 3, label = "Clés API", active = step == 2)
+                    StepPill(index = 4, label = "Connexion", active = step == 3)
                 }
                 Spacer(Modifier.height(12.dp))
                 LinearProgressIndicator(
@@ -223,6 +233,48 @@ fun SetupScreen(
                 ) {
                     when (currentStep) {
                         0 -> {
+                            SectionCard(
+                                title = "Où télécharger ?",
+                                subtitle = "Une ou deux destinations. Modifiable à tout moment dans les réglages.",
+                            ) {
+                                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                        DestinationChoice(
+                                            icon = Icons.Rounded.PhoneAndroid,
+                                            title = "Téléphone",
+                                            subtitle = "Directement sur cet appareil, sans Freebox",
+                                            selected = TARGET_PHONE in selectedTargets,
+                                            modifier = Modifier.weight(1f),
+                                        ) {
+                                            selectedTargets = toggleTarget(selectedTargets, TARGET_PHONE)
+                                        }
+                                        DestinationChoice(
+                                            icon = Icons.Rounded.CloudDownload,
+                                            title = "Freebox",
+                                            subtitle = "La box télécharge et conserve les fichiers",
+                                            selected = TARGET_FREEBOX in selectedTargets,
+                                            modifier = Modifier.weight(1f),
+                                        ) {
+                                            selectedTargets = toggleTarget(selectedTargets, TARGET_FREEBOX)
+                                        }
+                                    }
+                                }
+                            }
+                            Text(
+                                if (phoneSelected) {
+                                    "Le téléphone ne demande aucune clé supplémentaire : les mêmes clés API " +
+                                        "servent pour les deux destinations. Vous configurerez le dossier et les " +
+                                        "autorisations à la dernière étape."
+                                } else {
+                                    "La Freebox télécharge à votre place : les fichiers restent sur son disque " +
+                                        "et le téléphone peut fermer l'application."
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+
+                        1 -> {
                             SectionCard(
                                 title = "Vos trackers",
                                 subtitle = "Choisissez ceux que S3ARCH doit interroger. Modifiable à tout moment.",
@@ -260,7 +312,7 @@ fun SetupScreen(
                             )
                         }
 
-                        1 -> {
+                        2 -> {
                             if (chosen.isEmpty()) {
                                 Text(
                                     "Aucun tracker sélectionné : revenez à l'étape précédente.",
@@ -354,8 +406,12 @@ fun SetupScreen(
                         }
 
                         else -> {
+                            if (phoneSelected) {
+                                PhoneSetupCard(state = state, vm = vm, showTargets = false)
+                                Spacer(Modifier.height(4.dp))
+                            }
                             SectionCard(
-                                title = "Connexion à la Freebox",
+                                title = if (phoneSelected) "Freebox (facultatif)" else "Connexion à la Freebox",
                                 subtitle = "API officielle Freebox OS. Un dossier S3ARCH sera créé pour vos téléchargements.",
                             ) {
                                 Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -433,18 +489,28 @@ fun SetupScreen(
                     when (step) {
                         0 -> Button(
                             onClick = {
-                                vm.setEnabledTrackers(selectedTrackers)
+                                vm.setDownloadTargets(selectedTargets)
                                 step = 1
                             },
-                            enabled = selectedTrackers.isNotEmpty(),
+                            enabled = selectedTargets.isNotEmpty(),
                             modifier = Modifier.height(56.dp),
                             shape = RoundedCornerShape(50),
                         ) { Text("Continuer", style = MaterialTheme.typography.labelLarge) }
 
                         1 -> Button(
                             onClick = {
-                                persistKeys()
+                                vm.setEnabledTrackers(selectedTrackers)
                                 step = 2
+                            },
+                            enabled = selectedTrackers.isNotEmpty(),
+                            modifier = Modifier.height(56.dp),
+                            shape = RoundedCornerShape(50),
+                        ) { Text("Continuer", style = MaterialTheme.typography.labelLarge) }
+
+                        2 -> Button(
+                            onClick = {
+                                persistKeys()
+                                step = 3
                             },
                             enabled = hasKey,
                             modifier = Modifier.height(56.dp),
@@ -454,6 +520,7 @@ fun SetupScreen(
                         else -> {
                             TextButton(
                                 onClick = {
+                                    vm.setDownloadTargets(selectedTargets)
                                     persistKeys()
                                     onFinish()
                                 },
@@ -461,10 +528,11 @@ fun SetupScreen(
                             Spacer(Modifier.size(8.dp))
                             Button(
                                 onClick = {
+                                    vm.setDownloadTargets(selectedTargets)
                                     persistKeys()
                                     onFinish()
                                 },
-                                enabled = connected,
+                                enabled = connected || phoneSelected,
                                 modifier = Modifier.height(56.dp),
                                 shape = RoundedCornerShape(50),
                             ) {
@@ -478,6 +546,58 @@ fun SetupScreen(
             }
         }
     }
+}
+
+/** Une destination proposée au premier lancement. */
+@Composable
+private fun DestinationChoice(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    selected: Boolean,
+    modifier: Modifier = Modifier,
+    onToggle: () -> Unit,
+) {
+    val accent = MaterialTheme.colorScheme.primary
+    Surface(
+        onClick = onToggle,
+        modifier = modifier.border(
+            if (selected) 2.dp else 1.dp,
+            if (selected) accent else MaterialTheme.colorScheme.outlineVariant,
+            RoundedCornerShape(26.dp),
+        ),
+        shape = RoundedCornerShape(26.dp),
+        color = if (selected) accent.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surfaceContainerLow,
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    icon,
+                    contentDescription = null,
+                    tint = if (selected) accent else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.weight(1f))
+                if (selected) {
+                    Icon(Icons.Rounded.Check, contentDescription = null, tint = accent)
+                }
+            }
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/** Au moins une destination doit rester active. */
+private fun toggleTarget(current: Set<String>, target: String): Set<String> {
+    val next = if (target in current) current - target else current + target
+    return next.ifEmpty { setOf(target) }
 }
 
 @Composable

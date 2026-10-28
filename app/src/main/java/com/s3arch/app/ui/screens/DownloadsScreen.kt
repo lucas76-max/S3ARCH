@@ -64,6 +64,16 @@ import com.s3arch.app.util.formatBytes
 import com.s3arch.app.util.formatEta
 import com.s3arch.app.util.formatMbps
 import com.s3arch.app.util.statusLabel
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.DeleteForever
+import androidx.compose.material.icons.rounded.InsertDriveFile
+import androidx.compose.material.icons.rounded.Pause
+import androidx.compose.material.icons.rounded.PhoneAndroid
+import androidx.compose.material3.IconButton
+import com.s3arch.app.torrent.PhoneDownload
+import com.s3arch.app.ui.components.AddSourcesDialog
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 
@@ -82,8 +92,19 @@ fun DownloadsScreen(state: UiState, vm: S3archViewModel) {
     val active = state.tasks.values.count { !it.isDone && !it.isError }
     val totalRate = state.tasks.values.sumOf { it.rxRate }
     val finished = state.tracked.count { state.tasks[it.taskId]?.isDone == true }
+    val phoneActive = state.phoneDownloads.count { it.isActive }
+    val globalRate = totalRate + state.phoneDownloads.sumOf { it.rateBps }
+    val anyTransfer = state.tracked.isNotEmpty() || state.phoneDownloads.isNotEmpty()
     var confirmDelete by remember { mutableStateOf<TrackedDownload?>(null) }
     var confirmHide by remember { mutableStateOf<TrackedDownload?>(null) }
+    var confirmPhone by remember { mutableStateOf<PhoneDownload?>(null) }
+    var showAddSources by remember { mutableStateOf(false) }
+    val torrentPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenMultipleDocuments(),
+    ) { uris ->
+        if (uris.isNotEmpty()) vm.importTorrentFiles(context, uris)
+        showAddSources = false
+    }
 
     Column(
         modifier = Modifier
@@ -93,12 +114,18 @@ fun DownloadsScreen(state: UiState, vm: S3archViewModel) {
         ScreenHeader(
             title = "Transferts",
             subtitle = when {
-                state.tracked.isEmpty() -> "Aucun transfert sur la Freebox"
-                totalRate > 0 -> "$active en cours · ${formatMbps(totalRate)}"
-                else -> "$finished terminé${if (finished > 1) "s" else ""} · ${state.tracked.size} au total"
+                !anyTransfer -> "Aucun transfert"
+                globalRate > 0 -> "${active + phoneActive} en cours · ${formatMbps(globalRate)}"
+                else -> "${finished} terminé${if (finished > 1) "s" else ""} · " +
+                    "${state.tracked.size + state.phoneDownloads.size} au total"
             },
-            eyebrow = "Freebox OS",
+            eyebrow = "Téléphone · Freebox",
             icon = Icons.Rounded.CloudDownload,
+            trailing = {
+                IconButton(onClick = { showAddSources = true }) {
+                    Icon(Icons.Rounded.Add, contentDescription = "Ajouter un téléchargement")
+                }
+            },
         )
 
         if (state.freeboxError != null) {
@@ -121,11 +148,12 @@ fun DownloadsScreen(state: UiState, vm: S3archViewModel) {
             }
         }
 
-        if (state.tracked.isEmpty()) {
+        if (!anyTransfer) {
             EmptyState(
                 icon = Icons.Rounded.DownloadDone,
                 title = "Rien en téléchargement",
-                subtitle = "Lancez un téléchargement depuis la recherche : le fichier arrive dans le dossier S3ARCH de la Freebox.",
+                subtitle = "Lancez un téléchargement depuis la recherche, ou ajoutez un magnet, un lien .torrent " +
+                    "ou un fichier avec le bouton +.",
             )
         } else {
             LazyColumn(
@@ -133,18 +161,40 @@ fun DownloadsScreen(state: UiState, vm: S3archViewModel) {
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
-                items(items = state.tracked, key = { it.taskId }) { download ->
-                    DownloadCard(
-                        download = download,
-                        task = state.tasks[download.taskId],
-                        playing = state.playingId == download.taskId,
-                        busy = download.taskId in state.actionIds,
-                        onPlay = { vm.playInApp(context, download) },
-                        onPlayVlc = { vm.playWithVlc(context, download) },
-                        onCancel = { vm.cancelDownload(download) },
-                        onDelete = { confirmDelete = download },
-                        onHide = { confirmHide = download },
-                    )
+                if (state.phoneDownloads.isNotEmpty()) {
+                    item(key = "phone-header") {
+                        SectionLabel(
+                            "Sur le téléphone",
+                            state.phoneStorageLabel.ifBlank { "Dossier de l'application" },
+                        )
+                    }
+                    items(items = state.phoneDownloads, key = { "phone-" + it.id }) { download ->
+                        PhoneDownloadCard(
+                            download = download,
+                            onPlay = { vm.playPhoneDownload(context, download) },
+                            onPause = { vm.pausePhoneDownload(download.id) },
+                            onResume = { vm.resumePhoneDownload(download.id) },
+                            onDelete = { confirmPhone = download },
+                        )
+                    }
+                }
+                if (state.tracked.isNotEmpty()) {
+                    item(key = "freebox-header") {
+                        SectionLabel("Sur la Freebox", state.settings.freeboxDownloadDir)
+                    }
+                    items(items = state.tracked, key = { it.taskId }) { download ->
+                        DownloadCard(
+                            download = download,
+                            task = state.tasks[download.taskId],
+                            playing = state.playingId == download.taskId,
+                            busy = download.taskId in state.actionIds,
+                            onPlay = { vm.playInApp(context, download) },
+                            onPlayVlc = { vm.playWithVlc(context, download) },
+                            onCancel = { vm.cancelDownload(download) },
+                            onDelete = { confirmDelete = download },
+                            onHide = { confirmHide = download },
+                        )
+                    }
                 }
             }
         }
@@ -206,6 +256,246 @@ fun DownloadsScreen(state: UiState, vm: S3archViewModel) {
                 TextButton(onClick = { confirmHide = null }) { Text("Annuler") }
             },
         )
+    }
+
+    if (showAddSources) {
+        AddSourcesDialog(
+            phoneAvailable = true,
+            freeboxAvailable = state.settings.freeboxConfigured,
+            onDismiss = { showAddSources = false },
+            onPickTorrents = { torrentPicker.launch(arrayOf("application/x-bittorrent", "application/octet-stream", "*/*")) },
+            onSubmit = { text, target ->
+                vm.addManualSources(text, target, context)
+                showAddSources = false
+            },
+        )
+    }
+
+    // Supprimer un téléchargement du téléphone : les fichiers peuvent être conservés.
+    val phoneTarget = confirmPhone
+    if (phoneTarget != null) {
+        AlertDialog(
+            onDismissRequest = { confirmPhone = null },
+            icon = { Icon(Icons.Rounded.DeleteForever, contentDescription = null) },
+            title = { Text("Retirer ce téléchargement ?") },
+            text = {
+                Text(
+                    "« ${phoneTarget.name} » sera retiré de la liste. " +
+                        "Choisissez si les fichiers déjà téléchargés doivent aussi être effacés du téléphone.",
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        vm.removePhoneDownload(phoneTarget.id, true)
+                        confirmPhone = null
+                    },
+                ) { Text("Supprimer + fichiers", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(
+                        onClick = {
+                            vm.removePhoneDownload(phoneTarget.id, false)
+                            confirmPhone = null
+                        },
+                    ) { Text("Garder les fichiers") }
+                    TextButton(onClick = { confirmPhone = null }) { Text("Annuler") }
+                }
+            },
+        )
+    }
+}
+
+@Composable
+private fun SectionLabel(title: String, subtitle: String) {
+    Column {
+        Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        Text(
+            subtitle,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+/** Carte d'un torrent téléchargé directement sur l'appareil. */
+@Composable
+private fun PhoneDownloadCard(
+    download: PhoneDownload,
+    onPlay: () -> Unit,
+    onPause: () -> Unit,
+    onResume: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    val done = download.isDone
+    val error = download.isError
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(
+                1.dp,
+                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f),
+                RoundedCornerShape(30.dp),
+            ),
+        shape = RoundedCornerShape(30.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+    ) {
+        Column(modifier = Modifier.padding(18.dp)) {
+            Text(
+                download.name,
+                style = MaterialTheme.typography.titleMedium,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.height(10.dp))
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.horizontalScroll(rememberScrollState()),
+            ) {
+                Pill(
+                    text = "Téléphone",
+                    tint = MaterialTheme.colorScheme.tertiary,
+                    icon = Icons.Rounded.PhoneAndroid,
+                )
+                Pill(
+                    text = when {
+                        done -> "Terminé"
+                        error -> "Erreur"
+                        download.isPaused -> "En pause"
+                        download.state == PhoneDownload.STATE_METADATA -> "Métadonnées"
+                        download.state == PhoneDownload.STATE_CHECKING -> "Vérification"
+                        else -> "Téléchargement"
+                    },
+                    tint = when {
+                        done -> MaterialTheme.colorScheme.primary
+                        error -> MaterialTheme.colorScheme.error
+                        else -> MaterialTheme.colorScheme.secondary
+                    },
+                )
+                if (download.peers > 0 && !done) {
+                    Pill(
+                        text = "${download.peers} pairs",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        icon = Icons.Rounded.Upload,
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(14.dp))
+            WaveProgress(
+                progress = if (done) 1f else download.progress,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(8.dp),
+                color = if (error) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                trackColor = MaterialTheme.colorScheme.surfaceVariant,
+            )
+            Spacer(Modifier.height(10.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "${(download.progress * 100).toInt()} %",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                Spacer(Modifier.weight(1f))
+                Text(
+                    "${formatBytes(download.doneBytes)} / ${formatBytes(download.totalBytes)}",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (!done && download.rateBps > 0) {
+                Spacer(Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        Icons.Rounded.Speed,
+                        contentDescription = null,
+                        modifier = Modifier.size(15.dp),
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
+                    Spacer(Modifier.size(5.dp))
+                    Text(
+                        formatMbps(download.rateBps),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    Spacer(Modifier.size(14.dp))
+                    Text(
+                        formatEta(download.totalBytes - download.doneBytes, download.rateBps),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            if (download.error != null) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    download.error,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+
+            Spacer(Modifier.height(14.dp))
+            if (done) {
+                Button(
+                    onClick = onPlay,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp),
+                    shape = RoundedCornerShape(50),
+                ) {
+                    Icon(Icons.Rounded.PlayArrow, contentDescription = null, modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.size(8.dp))
+                    Text("Lire dans S3ARCH", style = MaterialTheme.typography.labelLarge)
+                }
+            } else if (error || download.isPaused) {
+                Button(
+                    onClick = onResume,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp),
+                    shape = RoundedCornerShape(50),
+                ) {
+                    Icon(Icons.Rounded.PlayArrow, contentDescription = null, modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.size(8.dp))
+                    Text("Reprendre", style = MaterialTheme.typography.labelLarge)
+                }
+            } else {
+                OutlinedButton(
+                    onClick = onPause,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp),
+                    shape = RoundedCornerShape(50),
+                ) {
+                    Icon(Icons.Rounded.Pause, contentDescription = null, modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.size(8.dp))
+                    Text("Mettre en pause", style = MaterialTheme.typography.labelLarge)
+                }
+            }
+            TextButton(
+                onClick = onDelete,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Icon(
+                    Icons.Rounded.DeleteOutline,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(Modifier.size(8.dp))
+                Text(
+                    "Retirer",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+        }
     }
 }
 

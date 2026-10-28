@@ -37,6 +37,10 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.s3arch.app.data.TARGET_FREEBOX
+import com.s3arch.app.data.TARGET_PHONE
+import com.s3arch.app.ui.components.DownloadTargetDialog
+import com.s3arch.app.ui.components.LargeDownloadDialog
 import com.s3arch.app.ui.components.LogoMark
 import com.s3arch.app.ui.components.UpdateBanner
 import com.s3arch.app.ui.components.UpdateDialog
@@ -86,6 +90,17 @@ fun AppRoot(vm: S3archViewModel) {
         accentColor = state.settings.accentColor,
     ) {
         VpnConsentEffect(state, vm)
+        DownloadTargetDialog(
+            request = state.targetPrompt,
+            onPhone = { vm.chooseDownloadTarget(TARGET_PHONE) },
+            onFreebox = { vm.chooseDownloadTarget(TARGET_FREEBOX) },
+            onDismiss = { vm.dismissTargetPrompt() },
+        )
+        LargeDownloadDialog(
+            request = state.sizeWarning,
+            onConfirm = { vm.confirmLargeDownload() },
+            onDismiss = { vm.dismissLargeDownload() },
+        )
         when {
             !state.loaded -> SplashScreen()
             !state.settings.onboardingDone -> SetupScreen(

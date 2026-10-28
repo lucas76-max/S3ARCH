@@ -21,10 +21,12 @@ android {
 
     defaultConfig {
         applicationId = "com.s3arch.app"
+        // Edition BETA : elle s'installe a cote de la version stable.
+        applicationIdSuffix = ".beta"
         minSdk = 26
         targetSdk = 35
-        versionCode = 21
-        versionName = "1.4.3"
+        versionCode = 22
+        versionName = "1.5.0"
     }
 
     signingConfigs {
@@ -94,6 +96,8 @@ dependencies {
     implementation("com.wireguard.android:tunnel:1.0.20230706")
     implementation("io.coil-kt:coil-compose:2.7.0")
     implementation("io.coil-kt:coil-svg:2.7.0")
+    // Ecriture dans le dossier choisi par l'utilisateur (Telechargements) sur Android 11+.
+    implementation("androidx.documentfile:documentfile:1.0.1")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 

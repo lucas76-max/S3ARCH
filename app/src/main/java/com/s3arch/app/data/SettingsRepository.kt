@@ -10,6 +10,7 @@ import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import com.s3arch.app.torrent.PhoneDownload
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 import java.util.UUID
@@ -59,7 +60,22 @@ class SettingsRepository(private val context: Context) {
             vpnConfig = prefs[VPN_CONFIG] ?: "",
             vpnLogin = prefs[VPN_LOGIN] ?: "s3arch",
             freeboxLanIp = prefs[FB_LAN_IP] ?: "",
+            downloadTargets = prefs[TARGETS_DOWNLOAD]
+                ?.filter { it == TARGET_PHONE || it == TARGET_FREEBOX }
+                ?.toSet()
+                ?.takeIf { it.isNotEmpty() }
+                ?: setOf(TARGET_FREEBOX),
+            phoneTreeUri = prefs[PHONE_TREE] ?: "",
         )
+    }
+
+    suspend fun setDownloadTargets(targets: Set<String>) {
+        val clean = targets.filter { it == TARGET_PHONE || it == TARGET_FREEBOX }.toSet()
+        context.dataStore.edit { it[TARGETS_DOWNLOAD] = clean.ifEmpty { setOf(TARGET_FREEBOX) } }
+    }
+
+    suspend fun setPhoneTreeUri(uri: String) {
+        context.dataStore.edit { it[PHONE_TREE] = uri.trim() }
     }
 
     suspend fun saveApiKeys(keys: Map<Tracker, String>, urls: Map<Tracker, String>) {
@@ -214,6 +230,23 @@ class SettingsRepository(private val context: Context) {
         }
     }
 
+    private val phoneDownloadsKey = stringPreferencesKey("phone_downloads")
+
+    val phoneDownloads: Flow<List<PhoneDownload>> = context.dataStore.data.map { prefs ->
+        val raw = prefs[phoneDownloadsKey] ?: return@map emptyList()
+        runCatching {
+            json.decodeFromString(ListSerializer(PhoneDownload.serializer()), raw)
+        }.getOrDefault(emptyList())
+    }
+
+    suspend fun savePhoneDownloads(items: List<PhoneDownload>) {
+        val payload = json.encodeToString(
+            ListSerializer(PhoneDownload.serializer()),
+            items.take(80),
+        )
+        context.dataStore.edit { it[phoneDownloadsKey] = payload }
+    }
+
     private fun decodeCustom(raw: String?): List<CustomTracker> {
         if (raw.isNullOrBlank()) return emptyList()
         return runCatching {
@@ -256,5 +289,7 @@ class SettingsRepository(private val context: Context) {
         val VPN_CONFIG = stringPreferencesKey("vpn_config")
         val VPN_LOGIN = stringPreferencesKey("vpn_login")
         val FB_LAN_IP = stringPreferencesKey("freebox_lan_ip")
+        val TARGETS_DOWNLOAD = stringSetPreferencesKey("download_targets")
+        val PHONE_TREE = stringPreferencesKey("phone_tree_uri")
     }
 }

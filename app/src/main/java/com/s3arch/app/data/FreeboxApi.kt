@@ -518,6 +518,35 @@ class FreeboxApi {
         (element as? JsonArray)?.mapNotNull { it.asTaskOrNull() } ?: emptyList()
     }
 
+    /**
+     * Espace libre (octets) de la partition qui heberge [dir], si la box le publie.
+     *
+     * `GET /storage/` n'est pas accessible a toutes les applications : l'appel est donc
+     * best-effort et une absence de reponse ne bloque jamais un telechargement.
+     */
+    suspend fun storageFreeBytes(dir: String): Long? = withContext(Dispatchers.IO) {
+        ensureSession()
+        val element = runCatching { authCall("/storage/", "GET", null) }.getOrNull()
+            ?: return@withContext null
+        val target = dir.trimEnd('/')
+        var bestDepth = -1
+        var bestFree: Long? = null
+        (element as? JsonArray)?.forEach { disk ->
+            val partitions = (disk as? JsonObject)?.get("partitions") as? JsonArray
+                ?: return@forEach
+            partitions.forEach { partition ->
+                val obj = partition as? JsonObject ?: return@forEach
+                val path = obj["path"]?.jsonPrimitive?.contentOrNull ?: return@forEach
+                val free = obj["free_bytes"]?.jsonPrimitive?.longOrNull ?: return@forEach
+                if (target.startsWith(path.trimEnd('/')) && path.length > bestDepth) {
+                    bestDepth = path.length
+                    bestFree = free
+                }
+            }
+        }
+        bestFree
+    }
+
     /** Resultat du test d'un lien avant de le confier a un lecteur. */
     data class StreamProbe(val ok: Boolean, val detail: String)
 

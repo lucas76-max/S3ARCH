@@ -3,6 +3,7 @@ package com.s3arch.app.ui
 import android.app.Application
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.util.Base64
 import com.s3arch.app.BuildConfig
 import androidx.lifecycle.AndroidViewModel
@@ -28,6 +29,18 @@ import com.s3arch.app.data.VlcProxyServer
 import com.s3arch.app.data.freeboxPath
 import com.s3arch.app.data.playableMedia
 import com.s3arch.app.data.vpn.VpnTunnel
+import com.s3arch.app.data.TARGET_FREEBOX
+import com.s3arch.app.data.TARGET_PHONE
+import com.s3arch.app.torrent.PhoneDownload
+import com.s3arch.app.torrent.PhoneDownloadsService
+import com.s3arch.app.torrent.PhoneEngine
+import com.s3arch.app.torrent.PhoneSource
+import com.s3arch.app.torrent.PhoneStorageFactory
+import com.s3arch.app.torrent.TorrentMeta
+import com.s3arch.app.torrent.parseSourceLines
+import com.s3arch.app.torrent.phoneSourceOf
+import com.s3arch.app.torrent.requiresSizeConfirmation
+import com.s3arch.app.torrent.spaceProblem
 import com.s3arch.app.util.ApkInstaller
 import com.s3arch.app.util.AppLog
 import com.s3arch.app.util.DownloadUrls
@@ -40,6 +53,7 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -55,6 +69,15 @@ enum class FreeboxStatus { Idle, Connecting, WaitingApproval, Connected, Error }
 data class SetupState(
     val status: FreeboxStatus = FreeboxStatus.Idle,
     val detail: String = "",
+)
+
+/** Une demande de telechargement avant qu'une destination soit choisie. */
+data class DownloadRequest(
+    val title: String,
+    val magnet: String? = null,
+    val url: String? = null,
+    val sizeBytes: Long = 0L,
+    val tracker: String = "",
 )
 
 data class UiState(
@@ -93,6 +116,14 @@ data class UiState(
     val updateDialogOpen: Boolean = false,
     val updateBusy: Boolean = false,
     val updateProgress: Float = 0f,
+    /** Telechargements lances directement sur ce telephone. */
+    val phoneDownloads: List<PhoneDownload> = emptyList(),
+    val phoneFreeBytes: Long = 0L,
+    val phoneStorageLabel: String = "",
+    /** Destination a choisir : telephone et Freebox sont tous deux configures. */
+    val targetPrompt: DownloadRequest? = null,
+    /** Confirmation demandee avant un telechargement de plus de 10 Go. */
+    val sizeWarning: DownloadRequest? = null,
 ) {
     /** Vrai quand la box a explicitement refuse le droit utile au VPN. */
     val needsSettingsRight: Boolean get() = freeboxRights?.contains("settings") == false
@@ -105,6 +136,10 @@ class S3archViewModel(app: Application) : AndroidViewModel(app) {
     private val freebox = FreeboxApi()
     private val proxy = VlcProxyServer()
     private val updates = UpdateRepository(app)
+    private val engine = PhoneEngine.get(app)
+
+    /** Horodatage de la derniere sauvegarde des telechargements telephone. */
+    private var lastPhoneSave = 0L
 
     @Volatile private var updateChecked = false
 
@@ -125,6 +160,25 @@ class S3archViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             repo.downloads.collect { list ->
                 _state.update { it.copy(tracked = list) }
+            }
+        }
+        // Le moteur telephone vit au niveau de l'application : il faut lui redonner
+        // la liste sauvegardee et son dossier avant le premier affichage.
+        viewModelScope.launch {
+            engine.restore(repo.phoneDownloads.first())
+            refreshPhoneStorage()
+            _state.update { it.copy(phoneDownloads = engine.downloads.value) }
+        }
+        viewModelScope.launch {
+            engine.downloads.collect { items ->
+                _state.update { it.copy(phoneDownloads = items) }
+                // Une ecriture DataStore toutes les 800 ms userait la flash : on
+                // sauvegarde a la fin des transferts et au maximum toutes les 4 s.
+                val now = System.currentTimeMillis()
+                if (items.none { it.isActive } || now - lastPhoneSave > 4_000) {
+                    lastPhoneSave = now
+                    repo.savePhoneDownloads(items)
+                }
             }
         }
     }
@@ -259,6 +313,51 @@ class S3archViewModel(app: Application) : AndroidViewModel(app) {
     // ------------------------------------------------------------------ telechargement
 
     fun download(result: TorrentResult) {
+        val targets = _state.value.settings.downloadTargets
+        if (TARGET_PHONE in targets) {
+            val request = DownloadRequest(
+                title = result.title,
+                magnet = result.magnet,
+                url = result.downloadUrl,
+                sizeBytes = result.sizeBytes,
+                tracker = result.trackerLabel,
+            )
+            if (TARGET_FREEBOX in targets) {
+                // Les deux destinations existent : on demande laquelle utiliser.
+                _state.update { it.copy(targetPrompt = request) }
+            } else {
+                dispatchPhone(request)
+            }
+            return
+        }
+        downloadToFreebox(
+            DownloadRequest(
+                title = result.title,
+                magnet = result.magnet,
+                url = result.downloadUrl,
+                sizeBytes = result.sizeBytes,
+                tracker = result.trackerLabel,
+            ),
+        )
+    }
+
+    private fun downloadToFreebox(request: DownloadRequest) {
+        downloadToFreeboxLegacy(
+            TorrentResult(
+                id = "manual-${System.currentTimeMillis()}",
+                title = request.title,
+                sizeBytes = request.sizeBytes,
+                seeders = 0,
+                leechers = 0,
+                trackerId = "manual",
+                trackerLabel = request.tracker.ifBlank { "Lien manuel" },
+                downloadUrl = request.url.orEmpty(),
+                magnet = request.magnet,
+            ),
+        )
+    }
+
+    private fun downloadToFreeboxLegacy(result: TorrentResult) {
         val key = "${result.trackerId}:${result.id}"
         if (key in _state.value.pendingDownloads) return
         _state.update { it.copy(pendingDownloads = it.pendingDownloads + key) }
@@ -275,6 +374,16 @@ class S3archViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 if (folder.trimEnd('/') != requested.trim().trimEnd('/')) {
                     AppLog.warn("Download", "Dossier demandé indisponible, repli sur $folder")
+                }
+
+                // La box publie l'espace libre de la partition : on refuse avant
+                // d'envoyer un torrent qui ne tiendrait pas.
+                val freeSpace = runCatching { freebox.storageFreeBytes(folder) }.getOrNull()
+                if (freeSpace != null) {
+                    spaceProblem("sur la Freebox", result.sizeBytes, freeSpace)?.let {
+                        message(it)
+                        return@launch
+                    }
                 }
 
                 AppLog.info("Download", "« ${result.title} » (${result.trackerLabel})")
@@ -991,6 +1100,168 @@ class S3archViewModel(app: Application) : AndroidViewModel(app) {
                 )
             }
         }
+    }
+
+    // ------------------------------------------------------------------ telephone
+
+    fun setDownloadTargets(targets: Set<String>) {
+        viewModelScope.launch { repo.setDownloadTargets(targets) }
+    }
+
+    /** Relit l'espace libre et le dossier reellement utilise sur le telephone. */
+    fun refreshPhoneStorage() {
+        _state.update {
+            it.copy(
+                phoneFreeBytes = engine.freeBytes(),
+                phoneStorageLabel = engine.storageLabel,
+            )
+        }
+    }
+
+    fun setPhoneFolder(context: Context, uri: Uri) {
+        viewModelScope.launch {
+            PhoneStorageFactory.persistPermission(context, uri)
+            repo.setPhoneTreeUri(uri.toString())
+            engine.updateStorage(uri.toString())
+            refreshPhoneStorage()
+            message("Dossier de téléchargement : ${engine.storageLabel}")
+        }
+    }
+
+    /** Reponse au choix « téléphone / Freebox » quand les deux sont configurés. */
+    fun chooseDownloadTarget(target: String) {
+        val request = _state.value.targetPrompt ?: return
+        _state.update { it.copy(targetPrompt = null) }
+        if (target == TARGET_PHONE) dispatchPhone(request) else downloadToFreebox(request)
+    }
+
+    fun dismissTargetPrompt() {
+        _state.update { it.copy(targetPrompt = null) }
+    }
+
+    private fun dispatchPhone(request: DownloadRequest) {
+        if (requiresSizeConfirmation(request.sizeBytes)) {
+            _state.update { it.copy(sizeWarning = request) }
+            return
+        }
+        startPhone(request)
+    }
+
+    fun confirmLargeDownload() {
+        val request = _state.value.sizeWarning ?: return
+        _state.update { it.copy(sizeWarning = null) }
+        startPhone(request)
+    }
+
+    fun dismissLargeDownload() {
+        _state.update { it.copy(sizeWarning = null) }
+    }
+
+    private fun startPhone(request: DownloadRequest) {
+        val sources = buildList {
+            request.magnet?.let { phoneSourceOf(it) }?.let { add(it) }
+            if (isEmpty()) request.url?.let { phoneSourceOf(it) }?.let { add(it) }
+        }
+        if (sources.isEmpty()) {
+            message("Aucun lien exploitable pour le téléphone")
+            return
+        }
+        spaceProblem("sur le téléphone", request.sizeBytes, engine.freeBytes())?.let {
+            message(it)
+            return
+        }
+        sources.forEach { engine.enqueue(it, request.title, request.tracker) }
+        PhoneDownloadsService.start(getApplication())
+        refreshPhoneStorage()
+        message("Téléchargement sur le téléphone")
+    }
+
+    /** Ajout manuel : plusieurs magnets, liens directs ou .torrent d'un seul coup. */
+    fun addManualSources(text: String, target: String, context: Context) {
+        val lines = parseSourceLines(text)
+        if (lines.isEmpty()) {
+            message("Collez au moins un lien magnet ou une adresse .torrent")
+            return
+        }
+        if (target == TARGET_PHONE) {
+            var added = 0
+            lines.forEach { line ->
+                val source = phoneSourceOf(line)
+                if (source != null) {
+                    engine.enqueue(source, null, "Lien manuel")
+                    added++
+                }
+            }
+            if (added == 0) {
+                message("Aucun lien reconnu")
+                return
+            }
+            PhoneDownloadsService.start(context)
+            refreshPhoneStorage()
+            message(if (added == 1) "Téléchargement ajouté" else "$added téléchargements ajoutés")
+            return
+        }
+        lines.forEach { line ->
+            val isMagnet = phoneSourceOf(line) is PhoneSource.Magnet
+            val request = DownloadRequest(
+                title = line.substringBefore('?').substringAfterLast('/').ifBlank { "Lien manuel" },
+                magnet = if (isMagnet) line else null,
+                url = if (isMagnet) null else line,
+                sizeBytes = 0L,
+                tracker = "Lien manuel",
+            )
+            downloadToFreebox(request)
+        }
+    }
+
+    /** Importe un ou plusieurs fichiers `.torrent` choisis dans le selecteur Android. */
+    fun importTorrentFiles(context: Context, uris: List<Uri>) {
+        if (uris.isEmpty()) return
+        viewModelScope.launch {
+            var added = 0
+            uris.forEach { uri ->
+                val bytes = withContext(Dispatchers.IO) {
+                    runCatching {
+                        context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                    }.getOrNull()
+                } ?: return@forEach
+                val meta = runCatching { TorrentMeta.parse(bytes) }.getOrNull()
+                engine.enqueue(
+                    PhoneSource.TorrentFile(bytes, meta?.name ?: "torrent-${added + 1}"),
+                    meta?.name,
+                    "Fichier .torrent",
+                )
+                added++
+            }
+            if (added == 0) {
+                message("Fichiers .torrent illisibles")
+                return@launch
+            }
+            PhoneDownloadsService.start(context)
+            refreshPhoneStorage()
+            message(if (added == 1) "Torrent ajouté" else "$added torrents ajoutés")
+        }
+    }
+
+    fun pausePhoneDownload(id: String) = engine.pause(id)
+
+    fun resumePhoneDownload(id: String) {
+        engine.resume(id)
+        PhoneDownloadsService.start(getApplication())
+    }
+
+    fun removePhoneDownload(id: String, deleteFiles: Boolean) {
+        engine.remove(id, deleteFiles)
+        refreshPhoneStorage()
+    }
+
+    fun playPhoneDownload(context: Context, download: PhoneDownload) {
+        val uri = engine.mediaUri(download.id)
+        if (uri == null) {
+            message("Fichier introuvable : il a peut-être été déplacé ou supprimé")
+            return
+        }
+        PlayerActivity.start(context, uri, download.name)
     }
 
     fun message(text: String) {

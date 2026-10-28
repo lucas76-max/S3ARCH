@@ -9,6 +9,12 @@ import java.time.ZoneOffset
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 
+/** Telechargement direct sur l'appareil. */
+const val TARGET_PHONE = "phone"
+
+/** Telechargement confie a la Freebox. */
+const val TARGET_FREEBOX = "freebox"
+
 /** Les trackers integres. L'URL de base est modifiable dans les reglages. */
 enum class Tracker(
     val id: String,
@@ -370,7 +376,14 @@ data class AppSettings(
     val vpnLogin: String = "s3arch",
     /** IP locale de la box, utilisee a travers le tunnel hors du reseau local. */
     val freeboxLanIp: String = "",
+    /** Destinations autorisees : "phone" (telephone) et/ou "freebox". */
+    val downloadTargets: Set<String> = setOf(TARGET_FREEBOX),
+    /** Dossier choisi sur le telephone (SAF). Vide = dossier par defaut. */
+    val phoneTreeUri: String = "",
 ) {
+
+    val hasPhoneTarget: Boolean get() = TARGET_PHONE in downloadTargets
+    val hasFreeboxTarget: Boolean get() = TARGET_FREEBOX in downloadTargets
     fun keyFor(tracker: Tracker): String = when (tracker) {
         Tracker.C411 -> c411Key
         Tracker.TR4KER -> tr4kerKey
