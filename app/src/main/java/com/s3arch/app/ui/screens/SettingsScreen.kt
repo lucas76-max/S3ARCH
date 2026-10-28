@@ -74,6 +74,7 @@ import com.s3arch.app.ui.components.LogoMark
 import com.s3arch.app.ui.components.ScreenHeader
 import com.s3arch.app.ui.components.SectionCard
 import com.s3arch.app.ui.components.StatusDot
+import com.s3arch.app.ui.components.TrackerChoice
 import com.s3arch.app.ui.components.TrackerKeyEditor
 import com.s3arch.app.ui.components.VpnSettingsContent
 import com.s3arch.app.ui.components.openFreeboxOs
@@ -101,6 +102,46 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
     var folder by rememberSaveable { mutableStateOf(state.settings.freeboxDownloadDir) }
     var showAddTracker by remember { mutableStateOf(false) }
     val context = LocalContext.current
+
+    fun keyOf(tracker: Tracker): String = when (tracker) {
+        Tracker.C411 -> c411Key
+        Tracker.TR4KER -> tr4kerKey
+        Tracker.V3X -> v3xKey
+        Tracker.ASTRATORRENT -> astraKey
+        Tracker.YGG_REBORN -> yggKey
+        Tracker.ZXX_CLUB -> zxxKey
+    }
+
+    fun urlOf(tracker: Tracker): String = when (tracker) {
+        Tracker.C411 -> c411Url
+        Tracker.TR4KER -> tr4kerUrl
+        Tracker.V3X -> v3xUrl
+        Tracker.ASTRATORRENT -> astraUrl
+        Tracker.YGG_REBORN -> yggUrl
+        Tracker.ZXX_CLUB -> zxxUrl
+    }
+
+    fun setKey(tracker: Tracker, value: String) {
+        when (tracker) {
+            Tracker.C411 -> c411Key = value
+            Tracker.TR4KER -> tr4kerKey = value
+            Tracker.V3X -> v3xKey = value
+            Tracker.ASTRATORRENT -> astraKey = value
+            Tracker.YGG_REBORN -> yggKey = value
+            Tracker.ZXX_CLUB -> zxxKey = value
+        }
+    }
+
+    fun setUrl(tracker: Tracker, value: String) {
+        when (tracker) {
+            Tracker.C411 -> c411Url = value
+            Tracker.TR4KER -> tr4kerUrl = value
+            Tracker.V3X -> v3xUrl = value
+            Tracker.ASTRATORRENT -> astraUrl = value
+            Tracker.YGG_REBORN -> yggUrl = value
+            Tracker.ZXX_CLUB -> zxxUrl = value
+        }
+    }
 
     if (showAddTracker) {
         AddTrackerDialog(
@@ -131,151 +172,98 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
         item {
             SectionCard(
                 modifier = Modifier.padding(horizontal = 16.dp),
-                title = "Clés API",
-                subtitle = "Demandées au premier lancement, modifiables à tout moment.",
+                title = "Trackers",
+                subtitle = "Cochez ceux que S3ARCH doit interroger ; leurs clés apparaissent en dessous.",
             ) {
-                Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                    TrackerKeyEditor(
-                        tracker = Tracker.C411,
-                        keyValue = c411Key,
-                        urlValue = c411Url,
-                        onKeyChange = { c411Key = it },
-                        onUrlChange = { c411Url = it },
-                        onTest = {
-                            vm.testTracker(
-                                TrackerSource(
-                                    Tracker.C411.id,
-                                    Tracker.C411.label,
-                                    c411Url,
-                                    c411Key,
-                                    Tracker.C411,
-                                ),
-                            )
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Tracker.entries.chunked(2).forEach { row ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            row.forEach { tracker ->
+                                TrackerChoice(
+                                    tracker = tracker,
+                                    selected = tracker.id in state.settings.enabledTrackers,
+                                    onToggle = { vm.toggleEnabledTracker(tracker.id) },
+                                    modifier = Modifier.weight(1f),
+                                )
+                            }
+                            if (row.size == 1) Spacer(Modifier.weight(1f))
+                        }
+                    }
+                    Text(
+                        if (state.settings.enabledTrackers.isEmpty()) {
+                            "Aucun tracker actif : la recherche ne renverra aucun résultat."
+                        } else {
+                            "${state.settings.enabledTrackers.size} tracker(s) actif(s) sur ${Tracker.entries.size}."
                         },
-                        testEnabled = !state.searching,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    TrackerKeyEditor(
-                        tracker = Tracker.TR4KER,
-                        keyValue = tr4kerKey,
-                        urlValue = tr4kerUrl,
-                        onKeyChange = { tr4kerKey = it },
-                        onUrlChange = { tr4kerUrl = it },
-                        onTest = {
-                            vm.testTracker(
-                                TrackerSource(
-                                    Tracker.TR4KER.id,
-                                    Tracker.TR4KER.label,
-                                    tr4kerUrl,
-                                    tr4kerKey,
-                                    Tracker.TR4KER,
-                                ),
-                            )
-                        },
-                        testEnabled = !state.searching,
-                    )
-                    TrackerKeyEditor(
-                        tracker = Tracker.V3X,
-                        keyValue = v3xKey,
-                        urlValue = v3xUrl,
-                        onKeyChange = { v3xKey = it },
-                        onUrlChange = { v3xUrl = it },
-                        onTest = {
-                            vm.testTracker(
-                                TrackerSource(
-                                    Tracker.V3X.id,
-                                    Tracker.V3X.label,
-                                    v3xUrl,
-                                    v3xKey,
-                                    Tracker.V3X,
-                                ),
-                            )
-                        },
-                        testEnabled = !state.searching,
-                    )
-                    TrackerKeyEditor(
-                        tracker = Tracker.ASTRATORRENT,
-                        keyValue = astraKey,
-                        urlValue = astraUrl,
-                        onKeyChange = { astraKey = it },
-                        onUrlChange = { astraUrl = it },
-                        onTest = {
-                            vm.testTracker(
-                                TrackerSource(
-                                    Tracker.ASTRATORRENT.id,
-                                    Tracker.ASTRATORRENT.label,
-                                    astraUrl,
-                                    astraKey,
-                                    Tracker.ASTRATORRENT,
-                                ),
-                            )
-                        },
-                        testEnabled = !state.searching,
-                    )
-                    TrackerKeyEditor(
-                        tracker = Tracker.YGG_REBORN,
-                        keyValue = yggKey,
-                        urlValue = yggUrl,
-                        onKeyChange = { yggKey = it },
-                        onUrlChange = { yggUrl = it },
-                        onTest = {
-                            vm.testTracker(
-                                TrackerSource(
-                                    Tracker.YGG_REBORN.id,
-                                    Tracker.YGG_REBORN.label,
-                                    yggUrl,
-                                    yggKey,
-                                    Tracker.YGG_REBORN,
-                                ),
-                            )
-                        },
-                        testEnabled = !state.searching,
-                    )
-                    TrackerKeyEditor(
-                        tracker = Tracker.ZXX_CLUB,
-                        keyValue = zxxKey,
-                        urlValue = zxxUrl,
-                        onKeyChange = { zxxKey = it },
-                        onUrlChange = { zxxUrl = it },
-                        onTest = {
-                            vm.testTracker(
-                                TrackerSource(
-                                    Tracker.ZXX_CLUB.id,
-                                    Tracker.ZXX_CLUB.label,
-                                    zxxUrl,
-                                    zxxKey,
-                                    Tracker.ZXX_CLUB,
-                                ),
-                            )
-                        },
-                        testEnabled = !state.searching,
-                    )
-                    Button(
-                        onClick = {
-                            vm.saveApiKeys(
-                                mapOf(
-                                    Tracker.C411 to c411Key,
-                                    Tracker.TR4KER to tr4kerKey,
-                                    Tracker.V3X to v3xKey,
-                                    Tracker.ASTRATORRENT to astraKey,
-                                    Tracker.YGG_REBORN to yggKey,
-                                    Tracker.ZXX_CLUB to zxxKey,
-                                ),
-                                mapOf(
-                                    Tracker.C411 to c411Url,
-                                    Tracker.TR4KER to tr4kerUrl,
-                                    Tracker.V3X to v3xUrl,
-                                    Tracker.ASTRATORRENT to astraUrl,
-                                    Tracker.YGG_REBORN to yggUrl,
-                                    Tracker.ZXX_CLUB to zxxUrl,
-                                ),
-                            )
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(54.dp),
-                        shape = RoundedCornerShape(50),
-                    ) {
-                        Text("Enregistrer les clés", style = MaterialTheme.typography.labelLarge)
+                }
+            }
+        }
+
+        if (state.settings.enabledTrackers.isNotEmpty()) {
+            item {
+                SectionCard(
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                    title = "Clés API",
+                    subtitle = "Uniquement pour les trackers actifs. Les clés restent sur cet appareil.",
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                        Tracker.entries
+                            .filter { it.id in state.settings.enabledTrackers }
+                            .forEach { tracker ->
+                                TrackerKeyEditor(
+                                    tracker = tracker,
+                                    keyValue = keyOf(tracker),
+                                    urlValue = urlOf(tracker),
+                                    onKeyChange = { value -> setKey(tracker, value) },
+                                    onUrlChange = { value -> setUrl(tracker, value) },
+                                    onTest = {
+                                        vm.testTracker(
+                                            TrackerSource(
+                                                tracker.id,
+                                                tracker.label,
+                                                urlOf(tracker),
+                                                keyOf(tracker),
+                                                tracker,
+                                            ),
+                                        )
+                                    },
+                                    testEnabled = !state.searching,
+                                )
+                            }
+                        Button(
+                            onClick = {
+                                vm.saveApiKeys(
+                                    mapOf(
+                                        Tracker.C411 to c411Key,
+                                        Tracker.TR4KER to tr4kerKey,
+                                        Tracker.V3X to v3xKey,
+                                        Tracker.ASTRATORRENT to astraKey,
+                                        Tracker.YGG_REBORN to yggKey,
+                                        Tracker.ZXX_CLUB to zxxKey,
+                                    ),
+                                    mapOf(
+                                        Tracker.C411 to c411Url,
+                                        Tracker.TR4KER to tr4kerUrl,
+                                        Tracker.V3X to v3xUrl,
+                                        Tracker.ASTRATORRENT to astraUrl,
+                                        Tracker.YGG_REBORN to yggUrl,
+                                        Tracker.ZXX_CLUB to zxxUrl,
+                                    ),
+                                )
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(54.dp),
+                            shape = RoundedCornerShape(50),
+                        ) {
+                            Text("Enregistrer les clés", style = MaterialTheme.typography.labelLarge)
+                        }
                     }
                 }
             }

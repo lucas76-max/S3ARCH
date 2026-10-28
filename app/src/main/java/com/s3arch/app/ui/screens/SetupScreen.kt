@@ -68,6 +68,7 @@ import com.s3arch.app.ui.components.AddTrackerDialog
 import com.s3arch.app.ui.components.LogoMark
 import com.s3arch.app.ui.components.SectionCard
 import com.s3arch.app.ui.components.TrackerKeyEditor
+import com.s3arch.app.ui.components.TrackerChoice
 import com.s3arch.app.ui.components.TrackerLogo
 import com.s3arch.app.ui.components.scaleOnPress
 
@@ -475,69 +476,6 @@ fun SetupScreen(
                     }
                 }
             }
-        }
-    }
-}
-
-/** Carte de selection d'un tracker : logo distant, nom en dessous, coche si active. */
-@Composable
-private fun TrackerChoice(
-    tracker: Tracker,
-    selected: Boolean,
-    onToggle: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Surface(
-        onClick = onToggle,
-        modifier = modifier,
-        shape = RoundedCornerShape(26.dp),
-        color = if (selected) {
-            MaterialTheme.colorScheme.primaryContainer
-        } else {
-            MaterialTheme.colorScheme.surfaceContainerHigh
-        },
-        border = BorderStroke(
-            width = if (selected) 2.dp else 1.dp,
-            color = if (selected) {
-                MaterialTheme.colorScheme.primary
-            } else {
-                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)
-            },
-        ),
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 10.dp, vertical = 16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Box {
-                TrackerLogo(url = tracker.logoUrl, label = tracker.label, size = 64)
-                if (selected) {
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .size(20.dp)
-                            .background(MaterialTheme.colorScheme.primary, CircleShape),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(
-                            Icons.Rounded.Check,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onPrimary,
-                            modifier = Modifier.size(14.dp),
-                        )
-                    }
-                }
-            }
-            Text(
-                tracker.label,
-                style = MaterialTheme.typography.titleSmall,
-                textAlign = TextAlign.Center,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
         }
     }
 }

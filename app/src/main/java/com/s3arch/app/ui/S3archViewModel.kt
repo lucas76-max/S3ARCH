@@ -135,6 +135,13 @@ class S3archViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { repo.setEnabledTrackers(updated) }
     }
 
+    /** Active ou desactive un tracker integre depuis les reglages. */
+    fun toggleEnabledTracker(id: String) {
+        val enabled = _state.value.settings.enabledTrackers
+        val updated = if (id in enabled) enabled - id else enabled + id
+        viewModelScope.launch { repo.setEnabledTrackers(updated) }
+    }
+
     fun addCustomTracker(label: String, url: String, key: String) {
         if (label.isBlank() || url.isBlank()) {
             message("Nom et URL Torznab obligatoires")
