@@ -12,6 +12,8 @@ data class PhoneDownload(
     val state: String = STATE_QUEUED,
     val totalBytes: Long = 0L,
     val doneBytes: Long = 0L,
+    /** Octets envoyes aux autres pairs pendant le partage. */
+    val uploadedBytes: Long = 0L,
     val rateBps: Long = 0L,
     val peers: Int = 0,
     val seeders: Int = 0,
@@ -26,6 +28,7 @@ data class PhoneDownload(
     val isDone: Boolean get() = state == STATE_DONE
     val isError: Boolean get() = state == STATE_ERROR
     val isPaused: Boolean get() = state == STATE_PAUSED
+    val isSeeding: Boolean get() = state == STATE_SEEDING
     val isActive: Boolean get() = state in ACTIVE
 
     companion object {
@@ -38,8 +41,16 @@ data class PhoneDownload(
         const val STATE_DONE = "done"
         const val STATE_PAUSED = "paused"
         const val STATE_ERROR = "error"
+        /** Fichier complet, encore partage avec les autres pairs. */
+        const val STATE_SEEDING = "seeding"
 
-        val ACTIVE = setOf(STATE_QUEUED, STATE_METADATA, STATE_CHECKING, STATE_DOWNLOADING)
+        val ACTIVE = setOf(
+            STATE_QUEUED,
+            STATE_METADATA,
+            STATE_CHECKING,
+            STATE_DOWNLOADING,
+            STATE_SEEDING,
+        )
     }
 }
 

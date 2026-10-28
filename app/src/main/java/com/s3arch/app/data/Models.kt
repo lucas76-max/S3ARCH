@@ -380,6 +380,8 @@ data class AppSettings(
     val downloadTargets: Set<String> = setOf(TARGET_FREEBOX),
     /** Dossier choisi sur le telephone (SAF). Vide = dossier par defaut. */
     val phoneTreeUri: String = "",
+    /** Continue a partager le torrent apres le telechargement (consomme batterie). */
+    val seedAfterDownload: Boolean = false,
 ) {
 
     val hasPhoneTarget: Boolean get() = TARGET_PHONE in downloadTargets

@@ -30,6 +30,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.rememberScrollState
@@ -164,6 +165,8 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
     }
 
     var settingsQuery by rememberSaveable { mutableStateOf("") }
+    // La configuration Freebox n'apparait qu'a la demande explicite.
+    var showFreeboxSetup by rememberSaveable { mutableStateOf(false) }
 
     /**
      * Un reglage reste affiche si le filtre est vide, s'il est contenu dans ses libelles,
@@ -180,6 +183,7 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
+            .statusBarsPadding()
             .background(MaterialTheme.colorScheme.background),
         contentPadding = PaddingValues(bottom = 32.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
@@ -212,24 +216,54 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
         }
 
         if (show("réglages reglages parametres preferences")) {
-        item {
-            ScreenHeader(
-                title = "Réglages",
-                subtitle = "Clés API, trackers tiers et Freebox",
-                eyebrow = "S3ARCH",
-                icon = Icons.Rounded.Settings,
-            )
-        }
+            item {
+                Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 2.dp)) {
+                    Text("Réglages", style = MaterialTheme.typography.displaySmall)
+                    Text(
+                        "Clés API, téléchargements et Freebox",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
         }
 
         // Telechargement direct sur l'appareil : dossier, batterie, notifications.
-        if (show("téléchargement téléphone telephone dossier stockage espace batterie notifications destination optimisation")) {
+        if (show("téléchargement téléphone telephone dossier stockage espace batterie notifications destination optimisation partage seed")) {
             item {
                 PhoneSetupCard(
                     state = state,
                     vm = vm,
                     modifier = Modifier.padding(horizontal = 16.dp),
                 )
+            }
+        }
+
+        // Rien sur la Freebox tant qu'elle n'a pas ete ajoutee : un seul bouton.
+        if (!state.settings.freeboxConfigured && !showFreeboxSetup &&
+            show("freebox ajouter une freebox box connexion distante")
+        ) {
+            item {
+                SectionCard(
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                    title = "Ajouter une Freebox",
+                    subtitle = "Facultatif : la box télécharge et conserve les fichiers, même application fermée.",
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text(
+                            "Sans Freebox, S3ARCH télécharge directement sur ce téléphone. En ajoutant " +
+                                "une Freebox, vous pourrez envoyer chaque téléchargement sur son disque, " +
+                                "et lire les fichiers depuis l'application.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Button(
+                            onClick = { showFreeboxSetup = true },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(50),
+                        ) { Text("Configurer ma Freebox") }
+                    }
+                }
             }
         }
 
@@ -522,7 +556,9 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
         }
         }
 
-        if (show("freebox freebox adresse dossier telechargement session autoriser connecter")) {
+        if ((state.settings.freeboxConfigured || showFreeboxSetup) &&
+            show("freebox freebox adresse dossier telechargement session autoriser connecter")
+        ) {
         item {
             SectionCard(
                 modifier = Modifier.padding(horizontal = 16.dp),
@@ -590,12 +626,17 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    if (!state.settings.freeboxConfigured) {
+                        TextButton(onClick = { showFreeboxSetup = false }) {
+                            Text("Masquer la configuration Freebox")
+                        }
+                    }
                 }
             }
         }
         }
 
-        if (state.needsSettingsRight) {
+        if ((state.settings.freeboxConfigured || showFreeboxSetup) && state.needsSettingsRight) {
             if (show("droits freebox autorisation settings parametres")) {
             item {
                 FreeboxRightsCard(
@@ -608,7 +649,9 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
             }
         }
 
-        if (show("accès hors du réseau local vpn wireguard hors reseau local distance tunnel")) {
+        if ((state.settings.freeboxConfigured || showFreeboxSetup) &&
+            show("accès hors du réseau local vpn wireguard hors reseau local distance tunnel")
+        ) {
         item {
             SectionCard(
                 modifier = Modifier.padding(horizontal = 16.dp),

@@ -22,6 +22,7 @@ import androidx.compose.material.icons.rounded.CloudDownload
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.PhoneAndroid
+import androidx.compose.material.icons.rounded.Upload
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -184,6 +185,28 @@ fun PhoneSetupCard(
                     Spacer(Modifier.size(8.dp))
                     Text("Autoriser les notifications")
                 }
+            }
+
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+            TargetSwitch(
+                title = "Partager après téléchargement",
+                subtitle = "Continue à envoyer le torrent terminé aux autres pairs (seed)",
+                checked = state.settings.seedAfterDownload,
+                icon = Icons.Rounded.Upload,
+            ) { vm.setSeedAfterDownload(!state.settings.seedAfterDownload) }
+            if (state.settings.seedAfterDownload) {
+                Text(
+                    "Le partage continue en arrière-plan, écran éteint : il peut consommer de la " +
+                        "batterie et des données. Désactivez-le si l'autonomie passe avant le ratio.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            } else {
+                Text(
+                    "Désactivé : le téléchargement s'arrête dès que le fichier est complet.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
     }

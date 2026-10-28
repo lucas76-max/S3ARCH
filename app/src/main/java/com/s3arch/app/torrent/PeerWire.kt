@@ -30,6 +30,8 @@ class PeerWire(
         fun onBitfield(wire: PeerWire, bits: BooleanArray) {}
         fun onUnchoke(wire: PeerWire) {}
         fun onChoke(wire: PeerWire) {}
+        fun onInterested(wire: PeerWire) {}
+        fun onRequest(wire: PeerWire, index: Int, begin: Int, length: Int) {}
         fun onHave(wire: PeerWire, index: Int) {}
         fun onBlock(wire: PeerWire, index: Int, begin: Int, data: ByteArray) {}
         fun onClosed(wire: PeerWire, reason: String?) {}
@@ -102,6 +104,31 @@ class PeerWire(
 
     fun sendInterested() = sendMessage(2, ByteArray(0))
 
+    /** Annonce les pieces deja presentes (indispensable pour le partage). */
+    fun sendBitfield(bits: BooleanArray) {
+        if (bits.isEmpty()) return
+        val payload = ByteArray((bits.size + 7) / 8)
+        bits.forEachIndexed { index, present ->
+            if (present) {
+                payload[index / 8] = (payload[index / 8].toInt() or (0x80 ushr (index % 8))).toByte()
+            }
+        }
+        sendMessage(5, payload)
+    }
+
+    fun sendUnchoke() = sendMessage(1, ByteArray(0))
+
+    fun sendChoke() = sendMessage(0, ByteArray(0))
+
+    /** Envoie un bloc a un pair qui le demande (partage). */
+    fun sendPiece(index: Int, begin: Int, data: ByteArray) {
+        val payload = ByteArray(8 + data.size)
+        putInt(payload, 0, index)
+        putInt(payload, 4, begin)
+        data.copyInto(payload, 8)
+        sendMessage(7, payload)
+    }
+
     fun sendHave(index: Int) {
         val payload = ByteArray(4)
         putInt(payload, 0, index)
@@ -163,8 +190,17 @@ class PeerWire(
             when (id) {
                 0 -> listener.onChoke(this)
                 1 -> listener.onUnchoke(this)
+                2 -> listener.onInterested(this)
                 4 -> if (payload.size >= 4) listener.onHave(this, readInt(payload, 0))
                 5 -> listener.onBitfield(this, decodeBits(payload))
+                6 -> if (payload.size >= 12) {
+                    listener.onRequest(
+                        this,
+                        readInt(payload, 0),
+                        readInt(payload, 4),
+                        readInt(payload, 8),
+                    )
+                }
                 7 -> if (payload.size >= 8) {
                     val index = readInt(payload, 0)
                     val begin = readInt(payload, 4)

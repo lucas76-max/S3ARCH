@@ -363,6 +363,7 @@ private fun PhoneDownloadCard(
                 )
                 Pill(
                     text = when {
+                        download.isSeeding -> "Partage"
                         done -> "Terminé"
                         error -> "Erreur"
                         download.isPaused -> "En pause"
@@ -383,11 +384,18 @@ private fun PhoneDownloadCard(
                         icon = Icons.Rounded.Upload,
                     )
                 }
+                if (download.uploadedBytes > 0) {
+                    Pill(
+                        text = "${formatBytes(download.uploadedBytes)} envoyés",
+                        tint = MaterialTheme.colorScheme.tertiary,
+                        icon = Icons.Rounded.Upload,
+                    )
+                }
             }
 
             Spacer(Modifier.height(14.dp))
             WaveProgress(
-                progress = if (done) 1f else download.progress,
+                progress = if (done || download.isSeeding) 1f else download.progress,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(8.dp),
@@ -442,7 +450,7 @@ private fun PhoneDownloadCard(
             }
 
             Spacer(Modifier.height(14.dp))
-            if (done) {
+            if (done || download.isSeeding) {
                 Button(
                     onClick = onPlay,
                     modifier = Modifier
@@ -453,6 +461,20 @@ private fun PhoneDownloadCard(
                     Icon(Icons.Rounded.PlayArrow, contentDescription = null, modifier = Modifier.size(20.dp))
                     Spacer(Modifier.size(8.dp))
                     Text("Lire dans S3ARCH", style = MaterialTheme.typography.labelLarge)
+                }
+                if (download.isSeeding) {
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedButton(
+                        onClick = onPause,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(50.dp),
+                        shape = RoundedCornerShape(50),
+                    ) {
+                        Icon(Icons.Rounded.Pause, contentDescription = null, modifier = Modifier.size(20.dp))
+                        Spacer(Modifier.size(8.dp))
+                        Text("Arrêter le partage", style = MaterialTheme.typography.labelLarge)
+                    }
                 }
             } else if (error || download.isPaused) {
                 Button(

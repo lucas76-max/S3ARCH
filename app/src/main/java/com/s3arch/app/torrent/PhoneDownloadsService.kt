@@ -107,6 +107,9 @@ class PhoneDownloadsService : Service() {
         val totalBytes = active.sumOf { it.totalBytes }
         val doneBytes = active.sumOf { it.doneBytes }
         val rate = active.sumOf { it.rateBps }
+        val seeding = active.count { it.state == PhoneDownload.STATE_SEEDING }
+        val uploading = active.any { it.state != PhoneDownload.STATE_SEEDING }
+        val uploaded = active.sumOf { it.uploadedBytes }
         val progress = if (totalBytes > 0) ((doneBytes * 100) / totalBytes).toInt() else 0
 
         val intent = Intent(this, MainActivity::class.java)
@@ -119,20 +122,31 @@ class PhoneDownloadsService : Service() {
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_download)
             .setContentTitle(
-                if (active.size == 1) active.first().name else "${active.size} téléchargements",
+                when {
+                    !uploading && seeding > 0 -> "Partage en cours"
+                    active.size == 1 -> active.first().name
+                    else -> "${active.size} téléchargements"
+                },
             )
             .setContentText(
                 buildString {
-                    append(formatBytes(doneBytes))
-                    if (totalBytes > 0) append(" / ").append(formatBytes(totalBytes))
-                    if (rate > 0) append(" · ").append(formatBytes(rate)).append("/s")
+                    if (uploading) {
+                        append(formatBytes(doneBytes))
+                        if (totalBytes > 0) append(" / ").append(formatBytes(totalBytes))
+                        if (rate > 0) append(" · ").append(formatBytes(rate)).append("/s")
+                    }
+                    if (seeding > 0) {
+                        if (isNotEmpty()) append(" · ")
+                        append("partage ")
+                        if (uploaded > 0) append(formatBytes(uploaded)).append(" envoyés")
+                    }
                 },
             )
             .setContentIntent(pending)
             .setOngoing(true)
             .setSilent(true)
             .setOnlyAlertOnce(true)
-            .setProgress(100, progress, totalBytes <= 0L)
+            .setProgress(100, progress, totalBytes <= 0L || !uploading)
 
         if (active.size > 1) {
             val style = NotificationCompat.InboxStyle()

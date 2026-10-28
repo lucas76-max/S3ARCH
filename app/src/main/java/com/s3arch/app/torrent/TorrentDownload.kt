@@ -27,7 +27,10 @@ internal class TorrentDownload(
     private val trackerClient: TrackerClient,
     private val peerId: ByteArray,
     private val donePieces: BooleanArray,
-    private val onProgress: (doneBytes: Long, rateBps: Long, peers: Int) -> Unit,
+    /** Continue a envoyer les pieces aux autres pairs une fois le fichier complet. */
+    private val seeding: Boolean,
+    private val onProgress: (doneBytes: Long, rateBps: Long, peers: Int, uploadedBytes: Long) -> Unit,
+    private val onComplete: (doneBytes: Long) -> Unit,
 ) {
     private class PieceJob(val index: Int, val size: Int, val wire: PeerWire) {
         val data = ByteArray(size)
@@ -41,9 +44,12 @@ internal class TorrentDownload(
     private val inFlight = HashMap<Int, PieceJob>()
     private val wires = LinkedHashMap<PeerAddress, PeerWire>()
     private val knownPeers = LinkedHashSet<PeerAddress>()
+    /** Pieces possedees par chaque pair, pour ne pas lui demander l'impossible. */
+    private val peerBits = java.util.concurrent.ConcurrentHashMap<PeerWire, BooleanArray>()
 
     @Volatile private var finished = false
     @Volatile private var lastError: String? = null
+    @Volatile private var uploadedBytes = 0L
     private var lastTickAt = System.currentTimeMillis()
     private var lastTickBytes = 0L
     private var rateBps = 0L
@@ -68,7 +74,8 @@ internal class TorrentDownload(
         val discovery = scope.launch { discoverPeers(scope) }
         try {
             var lastTick = 0L
-            while (!finished && lastError == null && currentCoroutineContext().isActive) {
+            // Apres completion, la boucle ne continue que pour le partage.
+            while ((!finished || seeding) && lastError == null && currentCoroutineContext().isActive) {
                 val batch = synchronized(lock) {
                     knownPeers
                         .filter { it !in wires }
@@ -84,13 +91,29 @@ internal class TorrentDownload(
                 }
                 val now = System.currentTimeMillis()
                 if (now - lastTick >= 1_000) {
+                    // Une piece confiee a un pair qui vient de tomber doit repartir
+                    // chez quelqu'un d'autre, sinon la file se bloque pour toujours.
+                    synchronized(lock) {
+                        wires.entries.removeIf { it.value.isClosed }
+                        val iterator = inFlight.entries.iterator()
+                        while (iterator.hasNext()) {
+                            if (iterator.next().value.wire.isClosed) iterator.remove()
+                        }
+                    }
+                    if (!finished) {
+                        synchronized(lock) {
+                            wires.values.filter { !it.isClosed }.forEach { wire ->
+                                assign(wire, peerBits[wire])
+                            }
+                        }
+                    }
                     lastTick = now
                     val done = completedBytes()
                     val elapsed = (now - lastTickAt).coerceAtLeast(1L)
                     rateBps = ((done - lastTickBytes) * 1000L / elapsed).coerceAtLeast(0L)
                     lastTickBytes = done
                     lastTickAt = now
-                    onProgress(done, rateBps, synchronized(lock) { wires.size })
+                    onProgress(done, rateBps, synchronized(lock) { wires.size }, uploadedBytes)
                 }
                 delay(600)
             }
@@ -117,7 +140,7 @@ internal class TorrentDownload(
         }
         var lastAnnounce = 0L
         try {
-            while (!finished) {
+            while (!finished || seeding) {
                 val now = System.currentTimeMillis()
                 if (now - lastAnnounce >= 45_000) {
                     lastAnnounce = now
@@ -216,11 +239,15 @@ internal class TorrentDownload(
             donePieces[job.index] = true
             wires.values.forEach { wire -> runCatching { wire.sendHave(job.index) } }
             if (donePieces.all { it }) {
-                finished = true
-                val done = completedBytes()
-                AppLog.info("Torrent", "Terminé : $done octets")
-                onProgress(done, 0L, 0)
-                wires.values.forEach { runCatching { it.close("torrent terminé") } }
+                if (!finished) {
+                    finished = true
+                    val done = completedBytes()
+                    AppLog.info("Torrent", "Terminé : $done octets (partage : $seeding)")
+                    onComplete(done)
+                    onProgress(done, 0L, synchronized(lock) { wires.size }, uploadedBytes)
+                }
+                // En partage, les connexions restent ouvertes pour servir les pairs.
+                if (!seeding) wires.values.forEach { runCatching { it.close("torrent terminé") } }
             }
         }
     }
@@ -232,20 +259,39 @@ internal class TorrentDownload(
                 if (iterator.next().value.wire === wire) iterator.remove()
             }
         }
-        assign(wire, null)
     }
 
     private inner class PeerListener : PeerWire.Listener {
         private var bits: BooleanArray? = null
+        private var interested = false
+
+        /** Un pair ne debloque nos requetes que si l'on s'est declare interesse. */
+        private fun ensureInterested(wire: PeerWire) {
+            if (interested) return
+            interested = true
+            runCatching { wire.sendInterested() }
+        }
+
+        override fun onReady(wire: PeerWire, metadataSize: Int, utMetadataId: Int) {
+            // En partage, le pair doit savoir ce que nous avons pour nous demander.
+            if (donePieces.any { it }) runCatching { wire.sendBitfield(donePieces) }
+            ensureInterested(wire)
+        }
 
         override fun onBitfield(wire: PeerWire, bits: BooleanArray) {
             this.bits = bits
+            peerBits[wire] = bits
+            ensureInterested(wire)
             assign(wire, bits)
         }
 
         override fun onHave(wire: PeerWire, index: Int) {
-            val array = bits ?: BooleanArray(meta.pieceCount).also { bits = it }
+            val array = bits ?: BooleanArray(meta.pieceCount).also {
+                bits = it
+                peerBits[wire] = it
+            }
             if (index in array.indices) array[index] = true
+            ensureInterested(wire)
             if (index in donePieces.indices && !donePieces[index]) assign(wire, array)
         }
 
@@ -256,12 +302,38 @@ internal class TorrentDownload(
         override fun onBlock(wire: PeerWire, index: Int, begin: Int, data: ByteArray) =
             handleBlock(wire, index, begin, data)
 
+        override fun onInterested(wire: PeerWire) {
+            // Un pair veut nos pieces : on accepte, sinon il ne demandera jamais rien.
+            runCatching { wire.sendUnchoke() }
+        }
+
+        override fun onRequest(wire: PeerWire, index: Int, begin: Int, length: Int) {
+            serveBlock(wire, index, begin, length)
+        }
+
         override fun onClosed(wire: PeerWire, reason: String?) {
+            peerBits.remove(wire)
             synchronized(lock) {
                 wires.remove(wire.address)
                 inFlight.entries.removeIf { it.value.wire === wire }
             }
         }
+    }
+
+    /** Sert un bloc demande par un pair, uniquement si la piece est complete. */
+    private fun serveBlock(wire: PeerWire, index: Int, begin: Int, length: Int) {
+        if (index !in donePieces.indices || !donePieces[index]) return
+        val pieceSize = meta.pieceSize(index)
+        if (begin < 0 || length <= 0 || begin + length > pieceSize) return
+        // Un bloc BitTorrent ne depasse jamais 16 Kio + marge.
+        if (length > 128 * 1024) return
+        val buffer = ByteArray(length)
+        val got = runCatching {
+            storage.read(index.toLong() * meta.pieceLength + begin, buffer, length)
+        }.getOrDefault(0)
+        if (got <= 0) return
+        runCatching { wire.sendPiece(index, begin, buffer.copyOf(got)) }
+        uploadedBytes += got
     }
 
     companion object {

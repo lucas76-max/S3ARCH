@@ -155,6 +155,7 @@ class S3archViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             repo.settings.collect { settings ->
                 _state.update { it.copy(settings = settings, loaded = true) }
+                engine.setSeeding(settings.seedAfterDownload)
             }
         }
         viewModelScope.launch {
@@ -1106,6 +1107,12 @@ class S3archViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setDownloadTargets(targets: Set<String>) {
         viewModelScope.launch { repo.setDownloadTargets(targets) }
+    }
+
+    /** Partage des torrents termines : actif en arriere-plan, au prix de la batterie. */
+    fun setSeedAfterDownload(enabled: Boolean) {
+        viewModelScope.launch { repo.setSeedAfterDownload(enabled) }
+        engine.setSeeding(enabled)
     }
 
     /** Relit l'espace libre et le dossier reellement utilise sur le telephone. */

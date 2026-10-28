@@ -51,6 +51,7 @@ class PhoneEngine private constructor(context: Context) {
 
     @Volatile private var storage: PhoneStorage = PhoneStorageFactory.fallback(appContext)
     @Volatile private var peerId: ByteArray = TrackerClient.randomPeerId()
+    @Volatile private var seedAfterDownload = false
 
     private val trackerClient = TrackerClient()
     private val http = OkHttpClient.Builder()
@@ -69,6 +70,24 @@ class PhoneEngine private constructor(context: Context) {
 
     fun setPeerId(id: ByteArray) {
         if (id.size == 20) peerId = id
+    }
+
+    /**
+     * Active ou coupe le partage des torrents deja termines.
+     *
+     * Desactiver suffit : les sessions en partage sont arretees et repassent en
+     * « Termine », sans relancer de telechargement.
+     */
+    fun setSeeding(enabled: Boolean) {
+        if (seedAfterDownload == enabled) return
+        seedAfterDownload = enabled
+        if (enabled) return
+        _downloads.value.filter { it.state == PhoneDownload.STATE_SEEDING }.forEach { record ->
+            jobs.remove(record.id)?.cancel()
+            update(record.id) {
+                it.copy(state = PhoneDownload.STATE_DONE, rateBps = 0L, peers = 0)
+            }
+        }
     }
 
     /** Installe la liste persistee : les telechargements actifs repassent en pause. */
@@ -98,7 +117,15 @@ class PhoneEngine private constructor(context: Context) {
     }
 
     fun pause(id: String) {
+        val record = current(id)
         jobs.remove(id)?.cancel()
+        if (record != null && record.isSeeding) {
+            // Arreter un partage ne doit pas remettre le fichier en « en pause ».
+            update(id) {
+                it.copy(state = PhoneDownload.STATE_DONE, rateBps = 0L, peers = 0)
+            }
+            return
+        }
         update(id) {
             it.copy(
                 state = if (it.isDone) it.state else PhoneDownload.STATE_PAUSED,
@@ -251,12 +278,39 @@ class PhoneEngine private constructor(context: Context) {
         }
 
         update(id) { it.copy(state = PhoneDownload.STATE_DOWNLOADING) }
-        val download = TorrentDownload(meta, target, trackerClient, peerId, done) { bytes, rate, peers ->
-            update(id) {
-                if (!it.isActive) it
-                else it.copy(doneBytes = bytes, rateBps = rate, peers = peers, totalBytes = meta.totalLength)
-            }
-        }
+        val seeding = seedAfterDownload
+        val download = TorrentDownload(
+            meta = meta,
+            storage = target,
+            trackerClient = trackerClient,
+            peerId = peerId,
+            donePieces = done,
+            seeding = seeding,
+            onProgress = { bytes, rate, peers, uploaded ->
+                update(id) {
+                    if (!it.isActive) it
+                    else it.copy(
+                        doneBytes = bytes,
+                        rateBps = rate,
+                        peers = peers,
+                        uploadedBytes = uploaded,
+                        totalBytes = meta.totalLength,
+                    )
+                }
+            },
+            onComplete = { total ->
+                update(id) {
+                    it.copy(
+                        state = if (seeding) PhoneDownload.STATE_SEEDING else PhoneDownload.STATE_DONE,
+                        doneBytes = total,
+                        totalBytes = meta.totalLength,
+                        rateBps = 0L,
+                        savePath = target.largestFilePath() ?: it.savePath,
+                        error = null,
+                    )
+                }
+            },
+        )
         try {
             download.run()
         } finally {
@@ -264,18 +318,9 @@ class PhoneEngine private constructor(context: Context) {
         }
 
         val complete = done.all { it }
-        if (complete) {
-            update(id) {
-                it.copy(
-                    state = PhoneDownload.STATE_DONE,
-                    doneBytes = meta.totalLength,
-                    rateBps = 0L,
-                    peers = 0,
-                    savePath = target.largestFilePath() ?: it.savePath,
-                    error = null,
-                )
-            }
-        } else if (current(id)?.isActive == true) {
+        // Un partage arrete volontairement garde son etat « Termine ».
+        val settled = current(id)?.let { it.isDone || it.isSeeding || it.isPaused } == true
+        if (!complete && !settled && current(id)?.isActive == true) {
             fail(id, "Téléchargement interrompu : plus aucun pair disponible")
         }
     }

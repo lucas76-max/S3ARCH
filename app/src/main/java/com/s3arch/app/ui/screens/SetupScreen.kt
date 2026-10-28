@@ -16,6 +16,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -56,6 +58,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
@@ -177,6 +180,8 @@ fun SetupScreen(
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         containerColor = MaterialTheme.colorScheme.background,
+        // Le fond du bandeau couvre la barre d'etat : plus de zone vide en haut.
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
     ) { padding ->
         Column(
             modifier = Modifier
@@ -184,7 +189,21 @@ fun SetupScreen(
                 .padding(padding)
                 .imePadding(),
         ) {
-            Column(modifier = Modifier.padding(horizontal = 24.dp, vertical = 22.dp)) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.16f),
+                                MaterialTheme.colorScheme.secondary.copy(alpha = 0.06f),
+                                Color.Transparent,
+                            ),
+                        ),
+                    )
+                    .statusBarsPadding()
+                    .padding(horizontal = 24.dp, vertical = 14.dp),
+            ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     LogoMark(56)
                     Spacer(Modifier.size(16.dp))
@@ -202,7 +221,15 @@ fun SetupScreen(
                     StepPill(index = 1, label = "Destination", active = step == 0)
                     StepPill(index = 2, label = "Trackers", active = step == 1)
                     StepPill(index = 3, label = "Clés API", active = step == 2)
-                    StepPill(index = 4, label = "Connexion", active = step == 3)
+                    StepPill(
+                        index = 4,
+                        label = when {
+                            phoneSelected && TARGET_FREEBOX in selectedTargets -> "Configuration"
+                            phoneSelected -> "Téléphone"
+                            else -> "Freebox"
+                        },
+                        active = step == 3,
+                    )
                 }
                 Spacer(Modifier.height(12.dp))
                 LinearProgressIndicator(
@@ -238,25 +265,24 @@ fun SetupScreen(
                                 subtitle = "Une ou deux destinations. Modifiable à tout moment dans les réglages.",
                             ) {
                                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                        DestinationChoice(
-                                            icon = Icons.Rounded.PhoneAndroid,
-                                            title = "Téléphone",
-                                            subtitle = "Directement sur cet appareil, sans Freebox",
-                                            selected = TARGET_PHONE in selectedTargets,
-                                            modifier = Modifier.weight(1f),
-                                        ) {
-                                            selectedTargets = toggleTarget(selectedTargets, TARGET_PHONE)
-                                        }
-                                        DestinationChoice(
-                                            icon = Icons.Rounded.CloudDownload,
-                                            title = "Freebox",
-                                            subtitle = "La box télécharge et conserve les fichiers",
-                                            selected = TARGET_FREEBOX in selectedTargets,
-                                            modifier = Modifier.weight(1f),
-                                        ) {
-                                            selectedTargets = toggleTarget(selectedTargets, TARGET_FREEBOX)
-                                        }
+                                    // Une carte par ligne : les deux libelles restent lisibles.
+                                    DestinationChoice(
+                                        icon = Icons.Rounded.PhoneAndroid,
+                                        title = "Téléphone",
+                                        subtitle = "Directement sur cet appareil, sans Freebox",
+                                        selected = TARGET_PHONE in selectedTargets,
+                                        modifier = Modifier.fillMaxWidth(),
+                                    ) {
+                                        selectedTargets = toggleTarget(selectedTargets, TARGET_PHONE)
+                                    }
+                                    DestinationChoice(
+                                        icon = Icons.Rounded.CloudDownload,
+                                        title = "Freebox",
+                                        subtitle = "La box télécharge et conserve les fichiers",
+                                        selected = TARGET_FREEBOX in selectedTargets,
+                                        modifier = Modifier.fillMaxWidth(),
+                                    ) {
+                                        selectedTargets = toggleTarget(selectedTargets, TARGET_FREEBOX)
                                     }
                                 }
                             }
@@ -410,8 +436,10 @@ fun SetupScreen(
                                 PhoneSetupCard(state = state, vm = vm, showTargets = false)
                                 Spacer(Modifier.height(4.dp))
                             }
+                            // Aucune etape Freebox si la box n'a pas ete choisie.
+                            if (TARGET_FREEBOX in selectedTargets) {
                             SectionCard(
-                                title = if (phoneSelected) "Freebox (facultatif)" else "Connexion à la Freebox",
+                                title = "Connexion à la Freebox",
                                 subtitle = "API officielle Freebox OS. Un dossier S3ARCH sera créé pour vos téléchargements.",
                             ) {
                                 Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -460,6 +488,7 @@ fun SetupScreen(
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
+                            }
                         }
                     }
                     Spacer(Modifier.height(12.dp))
@@ -569,27 +598,27 @@ private fun DestinationChoice(
         shape = RoundedCornerShape(26.dp),
         color = if (selected) accent.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surfaceContainerLow,
     ) {
-        Column(
+        Row(
             modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    icon,
-                    contentDescription = null,
-                    tint = if (selected) accent else MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(Modifier.weight(1f))
-                if (selected) {
-                    Icon(Icons.Rounded.Check, contentDescription = null, tint = accent)
-                }
-            }
-            Text(title, style = MaterialTheme.typography.titleMedium)
-            Text(
-                subtitle,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            Icon(
+                icon,
+                contentDescription = null,
+                tint = if (selected) accent else MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.titleMedium)
+                Text(
+                    subtitle,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (selected) {
+                Icon(Icons.Rounded.Check, contentDescription = null, tint = accent)
+            }
         }
     }
 }

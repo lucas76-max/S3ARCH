@@ -66,7 +66,12 @@ class SettingsRepository(private val context: Context) {
                 ?.takeIf { it.isNotEmpty() }
                 ?: setOf(TARGET_FREEBOX),
             phoneTreeUri = prefs[PHONE_TREE] ?: "",
+            seedAfterDownload = prefs[SEED_AFTER] ?: false,
         )
+    }
+
+    suspend fun setSeedAfterDownload(enabled: Boolean) {
+        context.dataStore.edit { it[SEED_AFTER] = enabled }
     }
 
     suspend fun setDownloadTargets(targets: Set<String>) {
@@ -291,5 +296,6 @@ class SettingsRepository(private val context: Context) {
         val FB_LAN_IP = stringPreferencesKey("freebox_lan_ip")
         val TARGETS_DOWNLOAD = stringSetPreferencesKey("download_targets")
         val PHONE_TREE = stringPreferencesKey("phone_tree_uri")
+        val SEED_AFTER = booleanPreferencesKey("seed_after_download")
     }
 }
