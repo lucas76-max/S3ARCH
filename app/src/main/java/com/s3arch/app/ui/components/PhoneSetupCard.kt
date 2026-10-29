@@ -47,7 +47,6 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.s3arch.app.data.TARGET_FREEBOX
 import com.s3arch.app.data.TARGET_PHONE
-import com.s3arch.app.torrent.PhoneStorageFactory
 import com.s3arch.app.ui.S3archViewModel
 import com.s3arch.app.ui.UiState
 import com.s3arch.app.util.formatBytes
@@ -120,19 +119,32 @@ fun PhoneSetupCard(
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
             }
 
+            // Aucun repli silencieux : sans dossier choisi, aucun telechargement ne
+            // demarre, sinon les fichiers partiraient dans un dossier que
+            // l'utilisateur ne retrouve pas.
+            val folderChosen = state.settings.phoneTreeUri.isNotBlank()
             Text(
-                "Dossier : ${state.phoneStorageLabel.ifBlank { PhoneStorageFactory.DEFAULT_FOLDER }}",
+                if (folderChosen) "Dossier : ${state.phoneStorageLabel}" else "Aucun dossier choisi",
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.Medium,
+                color = if (folderChosen) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.error,
             )
             Text(
-                "${formatBytes(state.phoneFreeBytes)} libres sur ce téléphone",
+                if (folderChosen) {
+                    "${formatBytes(state.phoneFreeBytes)} libres sur ce téléphone"
+                } else {
+                    "Obligatoire : S3ARCH n'enregistre rien tant que le dossier n'est pas choisi."
+                },
                 style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = if (folderChosen) {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                } else {
+                    MaterialTheme.colorScheme.error
+                },
             )
             Text(
-                "Sur Android 11 et plus, choisissez le dossier « Téléchargements » : S3ARCH y écrit ses " +
-                    "fichiers. Sans choix, ils vont dans le dossier privé de l'application.",
+                "Sur Android 11 et plus, choisissez le dossier « Téléchargements » : Android interdit " +
+                    "d'y écrire directement. S3ARCH y crée son sous-dossier et rien d'autre.",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -142,7 +154,7 @@ fun PhoneSetupCard(
             ) {
                 Icon(Icons.Rounded.Folder, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.size(8.dp))
-                Text("Choisir un dossier")
+                Text(if (folderChosen) "Changer de dossier" else "Choisir un dossier (obligatoire)")
             }
 
             StatusRow(

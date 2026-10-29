@@ -10,6 +10,7 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -140,6 +141,9 @@ fun SetupScreen(
     val busy = state.setup.status == FreeboxStatus.Connecting ||
         state.setup.status == FreeboxStatus.WaitingApproval
     val phoneSelected = TARGET_PHONE in selectedTargets
+    // Un dossier choisi est obligatoire pour telecharger sur le telephone.
+    val phoneFolderReady = !phoneSelected || state.settings.phoneTreeUri.isNotBlank()
+    val freeboxReady = TARGET_FREEBOX !in selectedTargets || connected
     val progress by animateFloatAsState(
         targetValue = step / 3f,
         animationSpec = spring(),
@@ -207,7 +211,7 @@ fun SetupScreen(
                         ),
                     )
                     .statusBarsPadding()
-                    .padding(start = 24.dp, end = 24.dp, top = 18.dp, bottom = 22.dp),
+                    .padding(start = 20.dp, end = 20.dp, top = 14.dp, bottom = 0.dp),
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     LogoMark(56)
@@ -221,8 +225,15 @@ fun SetupScreen(
                         )
                     }
                 }
-                Spacer(Modifier.height(20.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Spacer(Modifier.height(14.dp))
+                // Defilement horizontal : les quatre etapes restent visibles sur les
+                // petits ecrans, au lieu d'etre coupees.
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
                     StepPill(index = 1, label = "Destination", active = step == 0)
                     StepPill(index = 2, label = "Trackers", active = step == 1)
                     StepPill(index = 3, label = "Clés API", active = step == 2)
@@ -236,7 +247,7 @@ fun SetupScreen(
                         active = step == 3,
                     )
                 }
-                Spacer(Modifier.height(12.dp))
+                Spacer(Modifier.height(14.dp))
                 LinearProgressIndicator(
                     progress = { progress },
                     modifier = Modifier
@@ -254,13 +265,15 @@ fun SetupScreen(
                     .weight(1f)
                     .fillMaxWidth(),
                 transitionSpec = { fadeIn() togetherWith fadeOut() },
+                // Contenu colle en haut : jamais centre verticalement.
+                contentAlignment = Alignment.TopStart,
                 label = "setup-step",
             ) { currentStep ->
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
                         .verticalScroll(rememberScrollState())
-                        .padding(horizontal = 20.dp),
+                        .padding(start = 20.dp, end = 20.dp, top = 16.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
                     when (currentStep) {
@@ -566,7 +579,7 @@ fun SetupScreen(
                                     persistKeys()
                                     onFinish()
                                 },
-                                enabled = connected || phoneSelected,
+                                enabled = phoneFolderReady && freeboxReady,
                                 modifier = Modifier.height(56.dp),
                                 shape = RoundedCornerShape(50),
                             ) {

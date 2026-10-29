@@ -125,8 +125,10 @@ class PhoneEngine private constructor(context: Context) {
         val record = current(id)
         // Invalider la session avant de l'annuler : ses derniers callbacks ne doivent
         // pas ecraser l'etat « en pause » ni faire repartir la progression.
+        // La tache reste referencee dans `jobs` : la reprise attend sa fermeture
+        // complete (fichiers liberes) avant d'en ouvrir une nouvelle.
         runs.remove(id)
-        jobs.remove(id)?.cancel()
+        jobs[id]?.cancel()
         if (record != null && record.isSeeding) {
             // Arreter un partage ne doit pas remettre le fichier en « en pause ».
             update(id) {
@@ -146,7 +148,7 @@ class PhoneEngine private constructor(context: Context) {
     fun resume(id: String) {
         val record = current(id) ?: return
         if (record.isDone) return
-        if (jobs.containsKey(id)) return
+        if (jobs[id]?.isActive == true) return
         update(id) { it.copy(state = PhoneDownload.STATE_QUEUED, error = null, rateBps = 0L) }
         start(id)
     }
@@ -299,20 +301,44 @@ class PhoneEngine private constructor(context: Context) {
 
         val done = BooleanArray(meta.pieceCount)
         if (verifyExisting) {
+            // Relire les pieces deja ecrites : c'est ce qui permet de reprendre au
+            // pourcentage atteint au lieu de repartir de zero. Une piece illisible
+            // n'interrompt plus la reprise, elle est simplement retenue comme absente.
+            var unreadable = 0
             for (index in done.indices) {
                 if (!currentCoroutineContext().isActive) return
-                val piece = target.readPiece(index)
-                if (piece.isNotEmpty() && meta.matches(index, piece)) done[index] = true
+                val piece = runCatching { target.readPiece(index) }.getOrNull() ?: ByteArray(0)
+                if (piece.isEmpty()) unreadable++ else if (meta.matches(index, piece)) done[index] = true
             }
-            update(id) {
-                it.copy(doneBytes = done.indices.sumOf { i -> if (done[i]) meta.pieceSize(i).toLong() else 0L })
+            val restored = done.indices.sumOf { i -> if (done[i]) meta.pieceSize(i).toLong() else 0L }
+            if (restored == 0L && unreadable > 0) {
+                AppLog.warn("Téléphone", "Reprise : pièces illisibles, téléchargement relancé")
             }
+            update(id) { it.copy(doneBytes = restored) }
         } else {
             update(id) { it.copy(doneBytes = 0L) }
         }
 
-        update(id) { it.copy(state = PhoneDownload.STATE_DOWNLOADING) }
         val seeding = seedAfterDownload
+        // Toutes les pieces etaient deja presentes (pause juste avant la fin) :
+        // terminer proprement plutot que de relancer un telechargement complet.
+        if (meta.pieceCount > 0 && done.all { it } && !seeding) {
+            target.close()
+            update(id) {
+                it.copy(
+                    state = PhoneDownload.STATE_DONE,
+                    doneBytes = meta.totalLength,
+                    totalBytes = meta.totalLength,
+                    rateBps = 0L,
+                    peers = 0,
+                    savePath = target.largestFilePath() ?: it.savePath,
+                    error = null,
+                )
+            }
+            return
+        }
+
+        update(id) { it.copy(state = PhoneDownload.STATE_DOWNLOADING) }
         val download = TorrentDownload(
             meta = meta,
             storage = target,
@@ -382,7 +408,8 @@ class PhoneEngine private constructor(context: Context) {
             downloadTorrent(
                 id,
                 PhoneSource.Link(url, source.suggestedName),
-                verifyExisting = false,
+                // Un .torrent ajoute par lien doit aussi reprendre ou il s'est arrete.
+                verifyExisting = (current(id)?.doneBytes ?: 0L) > 0L,
                 isCurrent = isCurrent,
             )
             return
@@ -467,7 +494,7 @@ class PhoneEngine private constructor(context: Context) {
                             }
                         }
                     }
-                    runCatching { target.channel.force(false) }
+                    runCatching { target.channel.force() }
                     val finalTotal = if (total > 0) total else done
                     if (total > 0 && done < total) {
                         update(id) { it.copy(doneBytes = done, rateBps = 0L, state = PhoneDownload.STATE_PAUSED) }

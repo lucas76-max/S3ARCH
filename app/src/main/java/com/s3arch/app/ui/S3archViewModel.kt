@@ -1125,6 +1125,15 @@ class S3archViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** Sans dossier choisi, aucun fichier ne part dans un emplacement que l'on ne retrouve pas. */
+    private fun ensurePhoneFolder(): Boolean {
+        if (_state.value.settings.phoneTreeUri.isBlank()) {
+            message("Choisissez d'abord un dossier de téléchargement dans les réglages")
+            return false
+        }
+        return true
+    }
+
     fun setPhoneFolder(context: Context, uri: Uri) {
         viewModelScope.launch {
             PhoneStorageFactory.persistPermission(context, uri)
@@ -1165,6 +1174,7 @@ class S3archViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun startPhone(request: DownloadRequest) {
+        if (!ensurePhoneFolder()) return
         val sources = buildList {
             request.magnet?.let { phoneSourceOf(it) }?.let { add(it) }
             if (isEmpty()) request.url?.let { phoneSourceOf(it) }?.let { add(it) }
@@ -1191,6 +1201,7 @@ class S3archViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
         if (target == TARGET_PHONE) {
+            if (!ensurePhoneFolder()) return
             var added = 0
             lines.forEach { line ->
                 val source = phoneSourceOf(line)
@@ -1224,6 +1235,7 @@ class S3archViewModel(app: Application) : AndroidViewModel(app) {
     /** Importe un ou plusieurs fichiers `.torrent` choisis dans le selecteur Android. */
     fun importTorrentFiles(context: Context, uris: List<Uri>) {
         if (uris.isEmpty()) return
+        if (!ensurePhoneFolder()) return
         viewModelScope.launch {
             var added = 0
             uris.forEach { uri ->

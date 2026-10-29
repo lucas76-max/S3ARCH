@@ -165,7 +165,7 @@ fun DownloadsScreen(state: UiState, vm: S3archViewModel) {
                     item(key = "phone-header") {
                         SectionLabel(
                             "Sur le téléphone",
-                            state.phoneStorageLabel.ifBlank { "Dossier de l'application" },
+                            state.phoneStorageLabel.ifBlank { "Aucun dossier choisi" },
                         )
                     }
                     items(items = state.phoneDownloads, key = { "phone-" + it.id }) { download ->

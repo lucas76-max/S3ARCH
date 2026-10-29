@@ -5,22 +5,126 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
+import android.os.ParcelFileDescriptor
 import android.os.StatFs
+import android.system.Os
 import androidx.documentfile.provider.DocumentFile
 import com.s3arch.app.util.AppLog
 import java.io.File
-import java.io.FileOutputStream
 import java.io.IOException
+import java.nio.ByteBuffer
 import java.nio.channels.FileChannel
+
+/**
+ * Canal d'acces aleatoire en lecture **et** ecriture.
+ *
+ * Indispensable pour reprendre un torrent : sans relecture, impossible de verifier
+ * les pieces deja sur le disque, et la reprise repartait de zero. Les fichiers SAF
+ * (`ContentResolver`) ne donnent qu'un `FileOutputStream`, donc un canal en
+ * ecriture seule : d'ou cette abstraction et l'implementation par `pread`/`pwrite`.
+ */
+interface RandomChannel {
+    fun position(newPosition: Long)
+    fun size(): Long
+    fun read(dst: ByteBuffer): Int
+    fun write(src: ByteBuffer): Int
+    fun force()
+    fun close()
+}
 
 /** Canal d'ecriture d'un fichier de torrent, avec sa ressource a liberer. */
 class StorageChannel(
-    val channel: FileChannel,
-    private val release: () -> Unit,
+    val channel: RandomChannel,
+    private val release: () -> Unit = {},
 ) : AutoCloseable {
     override fun close() {
         runCatching { channel.close() }
         runCatching { release() }
+    }
+}
+
+/** Fichier classique (dossier public ou prive) : le `FileChannel` suffit. */
+class FileRandomChannel(private val channel: FileChannel) : RandomChannel {
+    override fun position(newPosition: Long) {
+        channel.position(newPosition)
+    }
+
+    override fun size(): Long = channel.size()
+    override fun read(dst: ByteBuffer): Int = channel.read(dst)
+    override fun write(src: ByteBuffer): Int = channel.write(src)
+    override fun force() {
+        runCatching { channel.force(false) }
+    }
+
+    override fun close() {
+        runCatching { channel.close() }
+    }
+}
+
+/**
+ * Document SAF lu et ecrit par descripteur.
+ *
+ * `FileOutputStream` ne sait pas relire : passer par `Os.pread`/`Os.pwrite` donne un
+ * acces complet au meme fichier, sans seconde ouverture ni cache incoherent.
+ */
+class DescriptorRandomChannel(private val descriptor: ParcelFileDescriptor) : RandomChannel {
+
+    private var position = 0L
+
+    override fun position(newPosition: Long) {
+        position = newPosition
+    }
+
+    override fun size(): Long =
+        runCatching { Os.fstat(descriptor.fileDescriptor).st_size }.getOrDefault(0L)
+
+    override fun read(dst: ByteBuffer): Int {
+        val size = dst.remaining()
+        if (size <= 0) return 0
+        val chunk = minOf(size, MAX_IO)
+        val buffer = ByteArray(chunk)
+        val count = try {
+            Os.pread(descriptor.fileDescriptor, buffer, 0, chunk, position)
+        } catch (e: Exception) {
+            throw IOException("Lecture impossible : ${e.message}")
+        }
+        if (count <= 0) return if (count == 0) -1 else count
+        dst.put(buffer, 0, count)
+        position += count
+        return count
+    }
+
+    override fun write(src: ByteBuffer): Int {
+        val size = src.remaining()
+        if (size <= 0) return 0
+        val chunk = minOf(size, MAX_IO)
+        val buffer = ByteArray(chunk)
+        src.get(buffer, 0, chunk)
+        var written = 0
+        while (written < chunk) {
+            val count = try {
+                Os.pwrite(descriptor.fileDescriptor, buffer, written, chunk - written, position + written)
+            } catch (e: Exception) {
+                throw IOException("Écriture impossible : ${e.message}")
+            }
+            if (count <= 0) throw IOException("Écriture interrompue")
+            written += count
+        }
+        position += chunk
+        return chunk
+    }
+
+    override fun force() {
+        runCatching { Os.fsync(descriptor.fileDescriptor) }
+    }
+
+    override fun close() {
+        runCatching { descriptor.close() }
+    }
+
+    private companion object {
+        /** Un bloc BitTorrent fait 16 Kio : inutile de copier des morceaux plus gros. */
+        const val MAX_IO = 256 * 1024
     }
 }
 
@@ -66,7 +170,7 @@ class FolderStorage(private val root: File, private val displayLabel: String? = 
         val random = java.io.RandomAccessFile(file, "rw")
         // Allocation creuse : le systeme connait la taille sans ecrire les zeros.
         if (expectedLength > random.length()) runCatching { random.setLength(expectedLength) }
-        return StorageChannel(random.channel) { runCatching { random.close() } }
+        return StorageChannel(FileRandomChannel(random.channel)) { runCatching { random.close() } }
     }
 
     override fun exists(relativePath: String): Boolean = File(root, relativePath).exists()
@@ -131,11 +235,7 @@ class TreeStorage(private val context: Context, private val treeUri: Uri) : Phon
             ?: throw IOException("Création impossible dans le dossier choisi")
         val descriptor = context.contentResolver.openFileDescriptor(document.uri, "rw")
             ?: throw IOException("Ouverture du fichier impossible (autorisation du dossier ?)")
-        val stream = FileOutputStream(descriptor.fileDescriptor)
-        return StorageChannel(stream.channel) {
-            runCatching { stream.close() }
-            runCatching { descriptor.close() }
-        }
+        return StorageChannel(DescriptorRandomChannel(descriptor))
     }
 
     override fun exists(relativePath: String): Boolean =

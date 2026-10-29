@@ -28,7 +28,8 @@ class TorrentStorage(
             // ecrit un octet a la fin pour etendre le fichier sans le remplir.
             if (runCatching { channel.channel.size() }.getOrDefault(0L) < entry.length) {
                 runCatching {
-                    channel.channel.write(ByteBuffer.wrap(byteArrayOf(0)), entry.length - 1)
+                    channel.channel.position(entry.length - 1)
+                    channel.channel.write(ByteBuffer.wrap(byteArrayOf(0)))
                 }
             }
         }
