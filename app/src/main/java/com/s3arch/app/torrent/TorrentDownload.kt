@@ -13,6 +13,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Telechargement d'un torrent deja connu (metadonnees disponibles).
@@ -32,18 +33,46 @@ internal class TorrentDownload(
     private val onProgress: (doneBytes: Long, rateBps: Long, peers: Int, uploadedBytes: Long) -> Unit,
     private val onComplete: (doneBytes: Long) -> Unit,
 ) {
-    private class PieceJob(val index: Int, val size: Int, val wire: PeerWire) {
+    private class PieceJob(val index: Int, val size: Int, firstWire: PeerWire) {
         val data = ByteArray(size)
         val totalBlocks = (size + BLOCK_SIZE - 1) / BLOCK_SIZE
         val blocks = BooleanArray(totalBlocks)
         var receivedBlocks = 0
-        var requestedBlocks = 0
-        /** Dernier bloc recu : au-dela de [PIECE_IDLE_MS], la piece repart ailleurs. */
-        @Volatile var lastBlockAt = System.currentTimeMillis()
+        val createdAt = System.currentTimeMillis()
+        /**
+         * Pairs qui travaillent sur cette piece : un seul en temps normal, plusieurs
+         * en fin de telechargement (le premier bloc recu gagne).
+         */
+        val wires = mutableSetOf(firstWire)
+        /** Blocs deja demandes, pair par pair : chacun a son propre compteur. */
+        private val requests = HashMap<PeerWire, BooleanArray>()
+        private val lastBlock = HashMap<PeerWire, Long>()
+
+        fun requestsOf(wire: PeerWire): BooleanArray =
+            requests.getOrPut(wire) { BooleanArray(totalBlocks) }
+
+        fun received(wire: PeerWire, block: Int) {
+            blocks[block] = true
+            requestsOf(wire)[block] = false
+            lastBlock[wire] = System.currentTimeMillis()
+        }
+
+        /** Blocs demandes a ce pair et pas encore arrives. */
+        fun pending(wire: PeerWire): Int {
+            val asked = requestsOf(wire)
+            var count = 0
+            for (block in asked.indices) if (asked[block] && !blocks[block]) count++
+            return count
+        }
+
+        fun silenceOf(wire: PeerWire): Long =
+            System.currentTimeMillis() - (lastBlock[wire] ?: createdAt)
     }
 
     private val lock = Any()
     private val inFlight = HashMap<Int, PieceJob>()
+    /** Pieces encore manquantes : sert a detecter la fin de telechargement. */
+    private val missingLeft = AtomicInteger(donePieces.count { !it })
     private val wires = LinkedHashMap<PeerAddress, PeerWire>()
     private val knownPeers = LinkedHashSet<PeerAddress>()
     /** Pieces possedees par chaque pair, pour ne pas lui demander l'impossible. */
@@ -66,6 +95,23 @@ internal class TorrentDownload(
     private val maxPeers = (96L * 1024 * 1024 / meta.pieceLength.coerceAtLeast(1L))
         .toInt()
         .coerceIn(4, 28)
+
+    /** Budget memoire global : pieces en vol, tous pairs confondus. */
+    private val pieceBudget = (96L * 1024 * 1024 / meta.pieceLength.coerceAtLeast(1L))
+        .toInt()
+        .coerceIn(6, 64)
+
+    /**
+     * Dernieres pieces : la meme piece est demandee a plusieurs pairs en meme temps.
+     * Sans cela, le dernier pour cent depend d'un seul pair et avance a la vitesse de
+     * sa latence, piece par piece.
+     */
+    private val endgameThreshold = (meta.pieceCount / 50).coerceIn(8, 64)
+
+    private fun inEndgame(): Boolean = missingLeft.get() <= endgameThreshold
+
+    /** Un pair muet libere plus vite sa piece quand il n'en reste que quelques-unes. */
+    private fun idleTimeout(): Long = if (inEndgame()) ENDGAME_IDLE_MS else PIECE_IDLE_MS
 
     private fun completedBytes(): Long {
         var total = 0L
@@ -107,19 +153,25 @@ internal class TorrentDownload(
                     synchronized(lock) {
                         deadUntil.entries.removeIf { it.value <= now }
                         wires.entries.removeIf { it.value.isClosed }
-                        val idleLimit = now - PIECE_IDLE_MS
+                        val idleLimit = idleTimeout()
                         val iterator = inFlight.entries.iterator()
                         while (iterator.hasNext()) {
                             val job = iterator.next().value
-                            if (job.wire.isClosed) {
+                            job.wires.removeIf { it.isClosed }
+                            if (job.wires.isEmpty()) {
                                 iterator.remove()
-                            } else if (job.lastBlockAt < idleLimit) {
-                                // Le pair garde la piece sans rien envoyer : c'est ce qui
-                                // laissait un torrent bloque juste avant la fin.
-                                iterator.remove()
-                                deadUntil[job.wire.address] = now + PEER_RETRY_MS
-                                stalled += job.wire
+                                continue
                             }
+                            // Chaque pair est juge separement : en fin de telechargement
+                            // deux pairs travaillent sur la meme piece, et seul le muet
+                            // doit etre remplace.
+                            val mute = job.wires.filter { job.silenceOf(it) >= idleLimit }
+                            mute.forEach { wire ->
+                                job.wires.remove(wire)
+                                deadUntil[wire.address] = now + PEER_RETRY_MS
+                            }
+                            stalled += mute
+                            if (job.wires.isEmpty()) iterator.remove()
                         }
                         if (!finished) toAssign += wires.values.filter { !it.isClosed }
                     }
@@ -190,38 +242,67 @@ internal class TorrentDownload(
     }
 
     private fun assign(wire: PeerWire, bits: BooleanArray?) {
-        val job = synchronized(lock) {
-            if (finished) return
-            if (inFlight.values.any { it.wire === wire }) return
-            val index = pickIndex(bits) ?: return
-            val created = PieceJob(index, meta.pieceSize(index), wire)
-            inFlight[index] = created
-            created
+        val jobs = mutableListOf<PieceJob>()
+        synchronized(lock) {
+            if (finished || wire.isClosed) return
+            if (inFlight.values.count { it.wires.contains(wire) } >= MAX_PIECES_PER_PEER) return
+            val fresh = pickIndex(bits)
+            if (fresh != null && inFlight.size < pieceBudget) {
+                val created = PieceJob(fresh, meta.pieceSize(fresh), wire)
+                inFlight[fresh] = created
+                jobs += created
+            } else if (inEndgame()) {
+                // Dernieres pieces : on les demande aussi a d'autres pairs, le premier
+                // bloc recu gagne. C'est ce qui evite de ramper a 98 %.
+                val duplicate = pickDuplicate(wire, bits)
+                val job = duplicate?.let { inFlight[it] }
+                if (job != null && job.wires.add(wire)) jobs += job
+            }
         }
         // Les requetes partent hors du verrou : une ecriture socket lente bloquait
         // sinon tous les autres pairs en meme temps.
-        requestNextBlocks(job)
+        jobs.forEach { job -> requestNextBlocks(job, wire) }
     }
 
-    /** Premiere piece manquante que ce pair possede ; sinon la premiere manquante. */
+    /**
+     * Premiere piece manquante que ce pair possede reellement.
+     *
+     * Un pair qui ne possede aucune piece manquante ne recoit rien : lui confier une
+     * piece qu'il n'a pas le laissait muet, puis le faisait blacklister une minute,
+     * ce qui vidait l'essaim au moment ou il ne reste que quelques pieces.
+     */
     private fun pickIndex(bits: BooleanArray?): Int? {
-        var fallback: Int? = null
         for (index in donePieces.indices) {
             if (donePieces[index] || inFlight.containsKey(index)) continue
-            val owned = bits == null || (index < bits.size && bits[index])
-            if (owned) return index
-            if (fallback == null) fallback = index
+            if (bits == null || (index < bits.size && bits[index])) return index
         }
-        return fallback
+        return null
     }
 
-    private fun requestNextBlocks(job: PieceJob) {
-        val wire = job.wire
-        while (job.requestedBlocks < job.totalBlocks && job.requestedBlocks - job.receivedBlocks < MAX_BLOCKS_IN_FLIGHT) {
-            val begin = job.requestedBlocks * BLOCK_SIZE
+    /** En fin de telechargement : une piece deja en vol que ce pair possede aussi. */
+    private fun pickDuplicate(wire: PeerWire, bits: BooleanArray?): Int? {
+        if (bits == null) return null
+        for (job in inFlight.values) {
+            if (job.wires.contains(wire)) continue
+            val index = job.index
+            if (index < bits.size && bits[index]) return index
+        }
+        return null
+    }
+
+    /** Demande les blocs qui manquent a cette piece, pour ce pair precisement. */
+    private fun requestNextBlocks(job: PieceJob, wire: PeerWire) {
+        if (wire.isClosed) return
+        val asked = job.requestsOf(wire)
+        var pending = job.pending(wire)
+        for (block in 0 until job.totalBlocks) {
+            if (pending >= MAX_BLOCKS_IN_FLIGHT) break
+            if (job.blocks[block] || asked[block]) continue
+            val begin = block * BLOCK_SIZE
             val length = minOf(BLOCK_SIZE, job.size - begin)
-            runCatching { wire.request(job.index, begin, length) }
-            job.requestedBlocks++
+            if (runCatching { wire.request(job.index, begin, length) }.isFailure) return
+            asked[block] = true
+            pending++
         }
     }
 
@@ -230,33 +311,32 @@ internal class TorrentDownload(
         var pending: PieceJob? = null
         synchronized(lock) {
             val job = inFlight[index] ?: return
-            if (job.wire !== wire) return
+            if (!job.wires.contains(wire)) return
             val blockIndex = begin / BLOCK_SIZE
             if (blockIndex !in 0 until job.totalBlocks || job.blocks[blockIndex]) return
             val length = minOf(data.size, job.size - begin)
             if (length <= 0) return
             data.copyInto(job.data, begin, 0, length)
-            job.blocks[blockIndex] = true
+            job.received(wire, blockIndex)
             job.receivedBlocks++
-            job.lastBlockAt = System.currentTimeMillis()
-            if (job.requestedBlocks < job.totalBlocks) pending = job
+            if (job.receivedBlocks < job.totalBlocks) pending = job
             if (job.receivedBlocks == job.totalBlocks) completed = job
         }
         // Requete suivante hors verrou, comme dans assign().
-        pending?.let { requestNextBlocks(it) }
-        completed?.let { finishPiece(it) }
+        pending?.let { requestNextBlocks(it, wire) }
+        completed?.let { finishPiece(it, wire) }
     }
 
-    private fun finishPiece(job: PieceJob) {
+    private fun finishPiece(job: PieceJob, from: PeerWire) {
         val peers = mutableListOf<PeerWire>()
         var closeAll = false
         synchronized(lock) {
-            inFlight.remove(job.index)
+            if (inFlight[job.index] === job) inFlight.remove(job.index)
             if (finished) return
             if (!meta.matches(job.index, job.data)) {
-                AppLog.warn("Torrent", "Pièce ${job.index} invalide reçue de ${job.wire.address}")
-                deadUntil[job.wire.address] = System.currentTimeMillis() + PEER_RETRY_MS
-                job.wire.close("pièce invalide")
+                AppLog.warn("Torrent", "Pièce ${job.index} invalide reçue de ${from.address}")
+                deadUntil[from.address] = System.currentTimeMillis() + PEER_RETRY_MS
+                from.close("pièce invalide")
                 return
             }
             val written = runCatching {
@@ -268,7 +348,8 @@ internal class TorrentDownload(
                 return
             }
             donePieces[job.index] = true
-            peers += wires.values.filter { !it.isClosed }
+            missingLeft.decrementAndGet()
+            peers += job.wires
             if (donePieces.all { it }) {
                 if (!finished) {
                     finished = true
@@ -284,14 +365,22 @@ internal class TorrentDownload(
         // Annonce et fermeture hors verrou : ecrire sur un socket lent ne doit pas
         // bloquer la fin des pieces des autres pairs.
         peers.forEach { wire -> runCatching { wire.sendHave(job.index) } }
-        if (closeAll) peers.forEach { runCatching { it.close("torrent terminé") } }
+        if (closeAll) {
+            peers.forEach { runCatching { it.close("torrent terminé") } }
+        } else {
+            // Le pair enchaine tout de suite sur une autre piece : sans cela il restait
+            // inactif jusqu'au prochain battement, ce qui hachait le debit.
+            peers.forEach { wire -> if (!wire.isClosed) assign(wire, peerBits[wire]) }
+        }
     }
 
     private fun release(wire: PeerWire) {
         synchronized(lock) {
             val iterator = inFlight.entries.iterator()
             while (iterator.hasNext()) {
-                if (iterator.next().value.wire === wire) iterator.remove()
+                val job = iterator.next().value
+                job.wires.remove(wire)
+                if (job.wires.isEmpty()) iterator.remove()
             }
         }
     }
@@ -348,10 +437,8 @@ internal class TorrentDownload(
 
         override fun onClosed(wire: PeerWire, reason: String?) {
             peerBits.remove(wire)
-            synchronized(lock) {
-                wires.remove(wire.address)
-                inFlight.entries.removeIf { it.value.wire === wire }
-            }
+            synchronized(lock) { wires.remove(wire.address) }
+            release(wire)
         }
     }
 
@@ -374,8 +461,12 @@ internal class TorrentDownload(
     companion object {
         const val BLOCK_SIZE = 16 * 1024
         private const val MAX_BLOCKS_IN_FLIGHT = 8
+        /** Pieces qu'un meme pair peut mener de front : c'est ce qui sature le lien. */
+        private const val MAX_PIECES_PER_PEER = 3
         /** Sans un seul bloc recu pendant ce delai, la piece repart chez un autre pair. */
-        private const val PIECE_IDLE_MS = 40_000L
+        private const val PIECE_IDLE_MS = 25_000L
+        /** Meme chose en fin de telechargement : le contournement prime sur la lenteur. */
+        private const val ENDGAME_IDLE_MS = 8_000L
         /** Un pair muet n'est pas retente avant ce delai. */
         private const val PEER_RETRY_MS = 60_000L
     }
