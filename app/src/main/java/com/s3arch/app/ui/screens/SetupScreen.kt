@@ -247,7 +247,9 @@ fun SetupScreen(
                         active = step == 3,
                     )
                 }
-                Spacer(Modifier.height(14.dp))
+                // Barre collee sous les etapes : le bandeau se termine tout de suite,
+                // sans grande zone vide avant le contenu.
+                Spacer(Modifier.height(8.dp))
                 LinearProgressIndicator(
                     progress = { progress },
                     modifier = Modifier
@@ -273,7 +275,7 @@ fun SetupScreen(
                     modifier = Modifier
                         .fillMaxSize()
                         .verticalScroll(rememberScrollState())
-                        .padding(start = 20.dp, end = 20.dp, top = 16.dp),
+                        .padding(start = 20.dp, end = 20.dp, top = 12.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
                     when (currentStep) {
