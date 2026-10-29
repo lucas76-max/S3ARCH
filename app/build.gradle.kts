@@ -21,12 +21,10 @@ android {
 
     defaultConfig {
         applicationId = "com.s3arch.app"
-        // Edition BETA : elle s'installe a cote de la version stable.
-        applicationIdSuffix = ".beta"
         minSdk = 26
         targetSdk = 35
-        versionCode = 26
-        versionName = "1.5.4"
+        versionCode = 27
+        versionName = "1.5.0"
     }
 
     signingConfigs {
