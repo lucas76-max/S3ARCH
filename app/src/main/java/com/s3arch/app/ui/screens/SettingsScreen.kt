@@ -3,6 +3,7 @@ package com.s3arch.app.ui.screens
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material.icons.rounded.Clear
+import androidx.compose.material.icons.rounded.FilterList
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.UploadFile
 import androidx.compose.material3.IconButton
@@ -16,6 +17,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -70,6 +72,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.s3arch.app.BuildConfig
+import com.s3arch.app.data.ConfigExport
 import com.s3arch.app.data.MediaType
 import com.s3arch.app.data.Tracker
 import com.s3arch.app.data.TrackerSource
@@ -79,10 +82,12 @@ import com.s3arch.app.ui.S3archViewModel
 import com.s3arch.app.ui.UiState
 import com.s3arch.app.ui.components.AddTrackerDialog
 import com.s3arch.app.ui.components.CustomTrackerRow
+import com.s3arch.app.ui.components.FiltersSummaryText
 import com.s3arch.app.ui.components.FreeboxRightsCard
 import com.s3arch.app.ui.components.LogoMark
 import com.s3arch.app.ui.components.PhoneSetupCard
 import com.s3arch.app.ui.components.ScreenHeader
+import com.s3arch.app.ui.components.SearchFiltersDialog
 import com.s3arch.app.ui.components.SectionCard
 import com.s3arch.app.ui.components.StatusDot
 import com.s3arch.app.ui.components.TrackerChoice
@@ -112,6 +117,13 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
     var host by rememberSaveable { mutableStateOf(state.settings.freeboxHost) }
     var folder by rememberSaveable { mutableStateOf(state.settings.freeboxDownloadDir) }
     var showAddTracker by remember { mutableStateOf(false) }
+    var settingsQuery by rememberSaveable { mutableStateOf("") }
+    // La configuration Freebox n'apparait qu'a la demande explicite.
+    var showFreeboxSetup by rememberSaveable { mutableStateOf(false) }
+    // Page affichee : « general » par defaut, comme demande.
+    var page by rememberSaveable { mutableStateOf("general") }
+    var filtersOpen by rememberSaveable { mutableStateOf(false) }
+    var tmdbKey by rememberSaveable { mutableStateOf(state.settings.tmdbKey) }
     val context = LocalContext.current
 
     fun keyOf(tracker: Tracker): String = when (tracker) {
@@ -164,17 +176,69 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
         )
     }
 
-    var settingsQuery by rememberSaveable { mutableStateOf("") }
-    // La configuration Freebox n'apparait qu'a la demande explicite.
-    var showFreeboxSetup by rememberSaveable { mutableStateOf(false) }
+    if (filtersOpen) {
+        SearchFiltersDialog(
+            filters = state.settings.filters,
+            onDismiss = { filtersOpen = false },
+            onApply = { filters ->
+                vm.saveFilters(filters)
+                filtersOpen = false
+            },
+        )
+    }
+
+    // Export / import de toute la configuration dans un fichier JSON.
+    val exporterConfig = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/json"),
+    ) { uri ->
+        if (uri != null) {
+            val payload = vm.exportConfig()
+            val written = runCatching {
+                context.contentResolver.openOutputStream(uri)?.use { stream ->
+                    stream.write(payload.toByteArray(Charsets.UTF_8))
+                } ?: error("flux indisponible")
+            }
+            if (written.isSuccess) vm.message("Configuration exportée") else vm.message("Export impossible")
+        }
+    }
+    val importerConfig = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri != null) {
+            val text = runCatching {
+                context.contentResolver.openInputStream(uri)
+                    ?.bufferedReader()
+                    ?.use { it.readText() }
+            }.getOrNull()
+            if (text.isNullOrBlank()) {
+                vm.message("Fichier illisible")
+            } else {
+                val config = ConfigExport.decode(text)
+                if (config == null) {
+                    vm.message("Fichier de configuration illisible")
+                } else {
+                    // Les champs affiches reprennent les valeurs importees sans redemarrage.
+                    c411Key = config.trackerKeys[Tracker.C411.id].orEmpty()
+                    tr4kerKey = config.trackerKeys[Tracker.TR4KER.id].orEmpty()
+                    v3xKey = config.trackerKeys[Tracker.V3X.id].orEmpty()
+                    astraKey = config.trackerKeys[Tracker.ASTRATORRENT.id].orEmpty()
+                    yggKey = config.trackerKeys[Tracker.YGG_REBORN.id].orEmpty()
+                    zxxKey = config.trackerKeys[Tracker.ZXX_CLUB.id].orEmpty()
+                    tmdbKey = config.tmdbKey
+                    vm.importConfig(text)
+                }
+            }
+        }
+    }
 
     /**
      * Un reglage reste affiche si le filtre est vide, s'il est contenu dans ses libelles,
      * ou si tous les mots saisis y figurent (recherche « couleur accent » par exemple).
      */
-    fun show(haystack: String): Boolean {
+    fun show(haystack: String, tab: String = "general"): Boolean {
         val needle = settingsQuery.trim().lowercase()
-        if (needle.isEmpty()) return true
+        // Recherche vide : seuls les reglages de la page courante sont affiches.
+        if (needle.isEmpty()) return page == tab
         if (haystack.contains(needle)) return true
         val words = needle.split(' ').filter { it.length >= 2 }
         return words.isNotEmpty() && words.all { haystack.contains(it) }
@@ -216,12 +280,41 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
             )
         }
 
-        if (show("réglages reglages parametres preferences")) {
+        item {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                listOf(
+                    "general" to "Général",
+                    "freebox" to "Freebox",
+                    "phone" to "Téléphone",
+                ).forEach { (id, label) ->
+                    FilterChip(
+                        selected = page == id && settingsQuery.isBlank(),
+                        onClick = {
+                            page = id
+                            settingsQuery = ""
+                        },
+                        label = { Text(label) },
+                    )
+                }
+            }
+        }
+
+        if (show("réglages reglages parametres preferences", page)) {
             item {
                 Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 2.dp)) {
                     Text("Réglages", style = MaterialTheme.typography.displaySmall)
                     Text(
-                        "Clés API, téléchargements et Freebox",
+                        when (page) {
+                            "freebox" -> "Freebox : autorisation, dossier, VPN"
+                            "phone" -> "Téléphone : dossier, batterie, partage"
+                            else -> "Clés API, filtres et configuration"
+                        },
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -230,7 +323,12 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
         }
 
         // Telechargement direct sur l'appareil : dossier, batterie, notifications.
-        if (show("téléchargement téléphone telephone dossier stockage espace batterie notifications destination optimisation partage seed")) {
+        if (show(
+                "téléchargement téléphone telephone dossier stockage espace batterie notifications " +
+                    "destination optimisation partage seed",
+                "phone",
+            )
+        ) {
             item {
                 PhoneSetupCard(
                     state = state,
@@ -242,7 +340,7 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
 
         // Rien sur la Freebox tant qu'elle n'a pas ete ajoutee : un seul bouton.
         if (!state.settings.freeboxConfigured && !showFreeboxSetup &&
-            show("freebox ajouter une freebox box connexion distante")
+            show("freebox ajouter une freebox box connexion distante", "freebox")
         ) {
             item {
                 SectionCard(
@@ -268,7 +366,7 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
             }
         }
 
-        if (show("trackers trackers cles api logos c411 tr4ker v3x astratorrent ygg zxx club")) {
+        if (show("trackers trackers cles api logos c411 tr4ker v3x astratorrent ygg zxx club", "general")) {
         item {
             SectionCard(
                 modifier = Modifier.padding(horizontal = 16.dp),
@@ -307,7 +405,7 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
         }
 
         if (state.settings.enabledTrackers.isNotEmpty()) {
-            if (show("clés api cles api c411 tr4ker v3x astratorrent ygg zxx club")) {
+            if (show("clés api cles api c411 tr4ker v3x astratorrent ygg zxx club", "general")) {
             item {
                 SectionCard(
                     modifier = Modifier.padding(horizontal = 16.dp),
@@ -372,7 +470,7 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
             }
         }
 
-        if (show("importer des clés importer import fichier texte cles api txt")) {
+        if (show("importer des clés importer import fichier texte cles api txt", "general")) {
         item {
             SectionCard(
                 modifier = Modifier.padding(horizontal = 16.dp),
@@ -442,7 +540,7 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
         }
         }
 
-        if (show("trackers tiers tracker tiers torznab personnalise endpoint")) {
+        if (show("trackers tiers tracker tiers torznab personnalise endpoint", "general")) {
         item {
             SectionCard(
                 modifier = Modifier.padding(horizontal = 16.dp),
@@ -481,7 +579,7 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
         }
         }
 
-        if (show("types de contenus types contenus films series musique ebooks applications jeux xxx autres filtre")) {
+        if (show("types de contenus types contenus films series musique ebooks applications jeux xxx autres filtre", "general")) {
         item {
             SectionCard(
                 modifier = Modifier.padding(horizontal = 16.dp),
@@ -520,7 +618,7 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
         }
         }
 
-        if (show("résultats resultats seeder torrents filtre masquer")) {
+        if (show("résultats resultats seeder torrents filtre masquer filtres avances langue qualite audio taille annee", "general")) {
         item {
             SectionCard(
                 modifier = Modifier.padding(horizontal = 16.dp),
@@ -558,7 +656,7 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
         }
 
         if ((state.settings.freeboxConfigured || showFreeboxSetup) &&
-            show("freebox freebox adresse dossier telechargement session autoriser connecter")
+            show("freebox freebox adresse dossier telechargement session autoriser connecter", "freebox")
         ) {
         item {
             SectionCard(
@@ -638,7 +736,7 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
         }
 
         if ((state.settings.freeboxConfigured || showFreeboxSetup) && state.needsSettingsRight) {
-            if (show("droits freebox autorisation settings parametres")) {
+            if (show("droits freebox autorisation settings parametres", "freebox")) {
             item {
                 FreeboxRightsCard(
                     state = state,
@@ -651,7 +749,7 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
         }
 
         if ((state.settings.freeboxConfigured || showFreeboxSetup) &&
-            show("accès hors du réseau local vpn wireguard hors reseau local distance tunnel")
+            show("accès hors du réseau local vpn wireguard hors reseau local distance tunnel", "freebox")
         ) {
         item {
             SectionCard(
@@ -668,7 +766,7 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
         }
         }
 
-        if (show("apparence apparence couleurs dynamiques material you accent palette theme")) {
+        if (show("apparence apparence couleurs dynamiques material you accent palette theme", "general")) {
         item {
             val dynamicSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
             val dynamicActive = dynamicSupported && state.settings.dynamicColor
@@ -750,7 +848,7 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
         }
         }
 
-        if (show("journaux journaux logs journal copier effacer diagnostic")) {
+        if (show("journaux journaux logs journal copier effacer diagnostic", "general")) {
         item {
             val logs by AppLog.entries.collectAsState()
             val clipboard = LocalClipboardManager.current
@@ -820,7 +918,137 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
         }
         }
 
-        if (show("a propos about version github logo application avertissement")) {
+        if (show("filtres avances filtres langue qualite audio taille annee seeders", "general")) {
+            item {
+                SectionCard(
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                    title = "Filtres avancés",
+                    subtitle = "Langue, qualité, audio, taille, année et sources : appliqués aux résultats.",
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        FiltersSummaryText(state.settings.filters)
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Button(
+                                onClick = { filtersOpen = true },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(50),
+                            ) {
+                                Icon(
+                                    Icons.Rounded.FilterList,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                                Spacer(Modifier.size(8.dp))
+                                Text("Configurer")
+                            }
+                            if (state.settings.filters.isActive) {
+                                OutlinedButton(
+                                    onClick = { vm.resetFilters() },
+                                    shape = RoundedCornerShape(50),
+                                ) { Text("Tout effacer") }
+                            }
+                        }
+                        Text(
+                            "Les mêmes filtres sont accessibles pendant la recherche, sans revenir ici.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+        }
+
+        if (show("tmdb affiches images descriptions fiches films cle tmdb", "general")) {
+            item {
+                SectionCard(
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                    title = "TMDB (facultatif)",
+                    subtitle = "Affiches et résumés des films dans la recherche.",
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        OutlinedTextField(
+                            value = tmdbKey,
+                            onValueChange = { tmdbKey = it },
+                            label = { Text("Clé API TMDB") },
+                            singleLine = true,
+                            shape = RoundedCornerShape(20.dp),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Button(
+                                onClick = { vm.setTmdbKey(tmdbKey) },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(50),
+                            ) { Text("Enregistrer") }
+                            OutlinedButton(
+                                onClick = {
+                                    tmdbKey = ""
+                                    vm.setTmdbKey("")
+                                },
+                                shape = RoundedCornerShape(50),
+                            ) { Text("Retirer") }
+                        }
+                        Text(
+                            "Sans clé, tout fonctionne : les fiches affichent simplement un logo neutre. " +
+                                "Avec une clé, 20 affiches sont demandées à la fois au fil du défilement. " +
+                                "Clé gratuite sur themoviedb.org → Paramètres du compte → API.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+        }
+
+        if (show("sauvegarde configuration export import json fichier s3arch_config", "general")) {
+            item {
+                SectionCard(
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                    title = "Sauvegarde de la configuration",
+                    subtitle = "Un fichier JSON avec vos clés API et tous vos réglages.",
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text(
+                            "L'export produit « S3ARCH_config.JSON » : clés API des trackers, trackers tiers, " +
+                                "filtres, apparence et configuration Freebox. Conservez-le hors de portée : " +
+                                "il contient vos clés.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            OutlinedButton(
+                                onClick = { exporterConfig.launch("S3ARCH_config.JSON") },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(50),
+                            ) {
+                                Icon(
+                                    Icons.Rounded.UploadFile,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                                Spacer(Modifier.size(8.dp))
+                                Text("Exporter")
+                            }
+                            OutlinedButton(
+                                onClick = {
+                                    importerConfig.launch(arrayOf("application/json", "text/plain", "*/*"))
+                                },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(50),
+                            ) { Text("Importer") }
+                        }
+                        Text(
+                            "L'import remplace les réglages présents dans le fichier et ne supprime jamais un " +
+                                "jeton Freebox ou une autorisation absents du fichier.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+        }
+
+        if (show("a propos about version github logo application avertissement", "general")) {
         item {
             Surface(
                 modifier = Modifier

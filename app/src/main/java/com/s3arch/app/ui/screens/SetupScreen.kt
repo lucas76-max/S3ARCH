@@ -1,5 +1,7 @@
 package com.s3arch.app.ui.screens
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
@@ -38,12 +40,14 @@ import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.CloudDownload
 import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.PhoneAndroid
+import androidx.compose.material.icons.rounded.UploadFile
 import androidx.compose.material.icons.rounded.Router
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -61,13 +65,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.s3arch.app.data.ConfigExport
 import com.s3arch.app.data.FreeboxPaths
+import com.s3arch.app.data.KeyImport
 import com.s3arch.app.data.TARGET_FREEBOX
 import com.s3arch.app.data.TARGET_PHONE
 import com.s3arch.app.data.Tracker
@@ -115,6 +122,86 @@ fun SetupScreen(
     var folder by rememberSaveable { mutableStateOf(state.settings.freeboxDownloadDir) }
     var showAddTracker by remember { mutableStateOf(false) }
     var selectedTargets by remember { mutableStateOf(state.settings.downloadTargets) }
+    val context = LocalContext.current
+
+    // Import d'un fichier « NOM = cle » sans ressaisie.
+    val keyImporter = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri != null) {
+            val text = runCatching {
+                context.contentResolver.openInputStream(uri)
+                    ?.bufferedReader()
+                    ?.use { it.readText() }
+            }.getOrNull()
+            val entries = runCatching { KeyImport.parse(text.orEmpty()) }.getOrDefault(emptyList())
+            if (entries.isEmpty()) {
+                vm.message("Aucune clé reconnue dans ce fichier")
+            } else {
+                entries.forEach { entry ->
+                    when (entry.tracker) {
+                        Tracker.C411 -> c411Key = entry.key
+                        Tracker.TR4KER -> tr4kerKey = entry.key
+                        Tracker.V3X -> v3xKey = entry.key
+                        Tracker.ASTRATORRENT -> astraKey = entry.key
+                        Tracker.YGG_REBORN -> yggKey = entry.key
+                        Tracker.ZXX_CLUB -> zxxKey = entry.key
+                    }
+                }
+                vm.saveApiKeys(
+                    mapOf(
+                        Tracker.C411 to c411Key,
+                        Tracker.TR4KER to tr4kerKey,
+                        Tracker.V3X to v3xKey,
+                        Tracker.ASTRATORRENT to astraKey,
+                        Tracker.YGG_REBORN to yggKey,
+                        Tracker.ZXX_CLUB to zxxKey,
+                    ),
+                    mapOf(
+                        Tracker.C411 to c411Url,
+                        Tracker.TR4KER to tr4kerUrl,
+                        Tracker.V3X to v3xUrl,
+                        Tracker.ASTRATORRENT to astraUrl,
+                        Tracker.YGG_REBORN to yggUrl,
+                        Tracker.ZXX_CLUB to zxxUrl,
+                    ),
+                )
+                vm.message("${entries.size} clé(s) importée(s)")
+            }
+        }
+    }
+
+    // Import d'une configuration complete exportee depuis S3ARCH.
+    val configImporter = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri != null) {
+            val text = runCatching {
+                context.contentResolver.openInputStream(uri)
+                    ?.bufferedReader()
+                    ?.use { it.readText() }
+            }.getOrNull()
+            val config = text?.let { ConfigExport.decode(it) }
+            if (config == null || text == null) {
+                vm.message("Fichier de configuration illisible")
+            } else {
+                c411Key = config.trackerKeys[Tracker.C411.id].orEmpty()
+                tr4kerKey = config.trackerKeys[Tracker.TR4KER.id].orEmpty()
+                v3xKey = config.trackerKeys[Tracker.V3X.id].orEmpty()
+                astraKey = config.trackerKeys[Tracker.ASTRATORRENT.id].orEmpty()
+                yggKey = config.trackerKeys[Tracker.YGG_REBORN.id].orEmpty()
+                zxxKey = config.trackerKeys[Tracker.ZXX_CLUB.id].orEmpty()
+                config.trackerUrls[Tracker.C411.id]?.let { c411Url = it }
+                config.trackerUrls[Tracker.TR4KER.id]?.let { tr4kerUrl = it }
+                config.trackerUrls[Tracker.V3X.id]?.let { v3xUrl = it }
+                config.trackerUrls[Tracker.ASTRATORRENT.id]?.let { astraUrl = it }
+                config.trackerUrls[Tracker.YGG_REBORN.id]?.let { yggUrl = it }
+                config.trackerUrls[Tracker.ZXX_CLUB.id]?.let { zxxUrl = it }
+                if (config.enabledTrackers.isNotEmpty()) selectedTrackers = config.enabledTrackers
+                vm.importConfig(text)
+            }
+        }
+    }
 
     fun keyOf(tracker: Tracker): String = when (tracker) {
         Tracker.C411 -> c411Key
@@ -433,6 +520,43 @@ fun SetupScreen(
                                         }
                                     }
                                 }
+
+                                // Deux imports : les seules cles, ou toute la configuration.
+                                OutlinedButton(
+                                    onClick = { keyImporter.launch(arrayOf("text/plain", "*/*")) },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(50),
+                                ) {
+                                    Icon(
+                                        Icons.Rounded.UploadFile,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp),
+                                    )
+                                    Spacer(Modifier.size(8.dp))
+                                    Text("Importer des clés (.txt)")
+                                }
+                                Text(
+                                    "Format du fichier : une ligne par tracker, « C411 = clé », " +
+                                        "« V3X = clé », « YGG_REBORN = passkey »… Le séparateur « : » " +
+                                        "fonctionne aussi et les lignes « # » sont ignorées.",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                OutlinedButton(
+                                    onClick = {
+                                        configImporter.launch(arrayOf("application/json", "text/plain", "*/*"))
+                                    },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(50),
+                                ) {
+                                    Text("Importer une configuration (.json)")
+                                }
+                                Text(
+                                    "Reprend vos clés API, vos trackers et tous vos réglages depuis le " +
+                                        "fichier « S3ARCH_config.JSON » exporté par l'application.",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
 
                                 TextButton(onClick = { showAddTracker = true }) {
                                     Text(

@@ -119,7 +119,6 @@ fun DownloadsScreen(state: UiState, vm: S3archViewModel) {
                 else -> "${finished} terminé${if (finished > 1) "s" else ""} · " +
                     "${state.tracked.size + state.phoneDownloads.size} au total"
             },
-            eyebrow = "Téléphone · Freebox",
             icon = Icons.Rounded.CloudDownload,
             trailing = {
                 IconButton(onClick = { showAddSources = true }) {
