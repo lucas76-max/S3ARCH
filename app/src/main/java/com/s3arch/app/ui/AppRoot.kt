@@ -8,8 +8,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.VideoLibrary
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -46,7 +46,7 @@ import com.s3arch.app.ui.components.UpdateBanner
 import com.s3arch.app.ui.components.UpdateDialog
 import com.s3arch.app.ui.components.VpnConsentEffect
 import com.s3arch.app.ui.theme.S3ARCHTheme
-import com.s3arch.app.ui.screens.DownloadsScreen
+import com.s3arch.app.ui.screens.LibraryScreen
 import com.s3arch.app.ui.screens.SearchScreen
 import com.s3arch.app.ui.screens.SettingsScreen
 import com.s3arch.app.ui.screens.SetupScreen
@@ -162,8 +162,10 @@ private fun MainScaffold(
                 NavigationBarItem(
                     selected = tab == 1,
                     onClick = { tab = 1 },
-                    icon = { Icon(Icons.Rounded.Download, contentDescription = null) },
-                    label = { Text(if (activeDownloads > 0) "Transferts ($activeDownloads)" else "Transferts") },
+                    icon = { Icon(Icons.Rounded.VideoLibrary, contentDescription = null) },
+                    label = {
+                        Text(if (activeDownloads > 0) "Bibliothèque ($activeDownloads)" else "Bibliothèque")
+                    },
                     colors = NavigationBarItemDefaults.colors(
                         selectedIconColor = MaterialTheme.colorScheme.primary,
                         selectedTextColor = MaterialTheme.colorScheme.primary,
@@ -188,7 +190,7 @@ private fun MainScaffold(
         Box(modifier = Modifier.padding(bottom = padding.calculateBottomPadding())) {
             when (tab) {
                 0 -> SearchScreen(state, vm)
-                1 -> DownloadsScreen(state, vm)
+                1 -> LibraryScreen(state, vm)
                 else -> SettingsScreen(state, vm)
             }
         }

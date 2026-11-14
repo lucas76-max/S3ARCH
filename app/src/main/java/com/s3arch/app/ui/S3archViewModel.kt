@@ -131,6 +131,8 @@ data class UiState(
     val sizeWarning: DownloadRequest? = null,
     /** Fiches TMDB deja recuperees, indexees par « tracker:id ». */
     val tmdb: Map<String, TmdbInfo> = emptyMap(),
+    /** Fiches de la bibliotheque, indexees par titre normalise. */
+    val libraryTmdb: Map<String, TmdbInfo> = emptyMap(),
 ) {
     /** Vrai quand la box a explicitement refuse le droit utile au VPN. */
     val needsSettingsRight: Boolean get() = freeboxRights?.contains("settings") == false
@@ -148,6 +150,8 @@ class S3archViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Resultats deja interroges sur TMDB : evite les requetes en double. */
     private val tmdbAsked = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    /** Titres de la bibliotheque deja demandes a TMDB. */
+    private val libraryAsked = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
     /** Horodatage de la derniere sauvegarde des telechargements telephone. */
     private var lastPhoneSave = 0L
@@ -300,6 +304,37 @@ class S3archViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Fiche TMDB deja chargee pour ce resultat, s'il y en a une. */
     fun tmdbInfoFor(result: TorrentResult): TmdbInfo? = _state.value.tmdb[tmdbKeyOf(result)]
+
+    /** Titre lisible d'un nom de fichier (`Super.Mario.Bros…` devient `Super Mario Bros`). */
+    fun prettyTitle(raw: String): String = MediaTitle.normalize(raw)
+
+    /**
+     * Affiches de la bibliotheque : les telechargements gardent le nom brut du torrent,
+     * on interroge donc TMDB par titre normalise, 20 au maximum par appel.
+     */
+    fun requestLibraryTmdb(titles: List<String>) {
+        val apiKey = _state.value.settings.tmdbKey.trim()
+        if (apiKey.isBlank()) return
+        val pending = titles
+            .map { MediaTitle.normalize(it) }
+            .filter { it.isNotBlank() && it !in libraryAsked }
+            .distinct()
+            .take(20)
+        if (pending.isEmpty()) return
+        pending.forEach { libraryAsked += it }
+        viewModelScope.launch {
+            pending.forEach { title ->
+                try {
+                    val info = tmdb.lookup(apiKey, title, MediaTitle.yearOf(title)) ?: return@forEach
+                    _state.update { it.copy(libraryTmdb = it.libraryTmdb + (title to info)) }
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    AppLog.warn("TMDB", "Affiche ignorée : ${e.message ?: e.javaClass.simpleName}")
+                }
+            }
+        }
+    }
 
     /**
      * Recupere les affiches et resumes manquants, **20 resultats au maximum par appel**.
