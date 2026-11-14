@@ -67,7 +67,67 @@ class SettingsRepository(private val context: Context) {
                 ?: setOf(TARGET_PHONE),
             phoneTreeUri = prefs[PHONE_TREE] ?: "",
             seedAfterDownload = prefs[SEED_AFTER] ?: false,
+            // Cles ajoutees apres coup : une installation existante les lit a leur
+            // valeur par defaut, rien n'est efface.
+            tmdbKey = prefs[TMDB_KEY] ?: "",
+            filters = SearchFilterCodec.decode(prefs[FILTERS]),
         )
+    }
+
+    /** Cle TMDB facultative (affiches et descriptions). */
+    suspend fun setTmdbKey(value: String) {
+        context.dataStore.edit { it[TMDB_KEY] = value.trim() }
+    }
+
+    suspend fun saveFilters(filters: SearchFilters) {
+        context.dataStore.edit { it[FILTERS] = SearchFilterCodec.encode(filters) }
+    }
+
+    /**
+     * Applique une configuration importee.
+     *
+     * Seules les valeurs non vides ecrasent l'existant pour les textes sensibles
+     * (jeton Freebox, VPN, dossier du telephone) : un fichier partiel ne peut pas
+     * effacer une autorisation deja obtenue.
+     */
+    suspend fun applyConfig(config: S3archConfig) {
+        context.dataStore.edit { prefs ->
+            config.trackerKeys.forEach { (id, value) ->
+                Tracker.fromId(id)?.let { prefs[keyPreference(it)] = value.trim() }
+            }
+            config.trackerUrls.forEach { (id, value) ->
+                if (value.isNotBlank()) Tracker.fromId(id)?.let { prefs[urlPreference(it)] = value.trim() }
+            }
+            prefs[CUSTOM] = encodeCustom(config.customTrackers)
+            val enabled = config.enabledTrackers.filter { id ->
+                Tracker.fromId(id) != null || config.customTrackers.any { it.id == id }
+            }.toSet()
+            prefs[ENABLED] = enabled.ifEmpty { Tracker.entries.map { it.id }.toSet() }
+            prefs[TMDB_KEY] = config.tmdbKey.trim()
+            prefs[FILTERS] = SearchFilterCodec.encode(config.filters)
+            prefs[SORT_MODE] = SortMode.fromId(config.sortMode).id
+            prefs[TYPES] = config.enabledTypes
+            prefs[HIDE_ZERO_SEEDERS] = config.hideZeroSeeders
+            prefs[DYNAMIC_COLOR] = config.dynamicColor
+            prefs[ACCENT_COLOR] = config.accentColor
+            val targets = config.downloadTargets
+                .filter { it == TARGET_PHONE || it == TARGET_FREEBOX }
+                .toSet()
+            prefs[TARGETS_DOWNLOAD] = targets.ifEmpty { setOf(TARGET_PHONE) }
+            prefs[SEED_AFTER] = config.seedAfterDownload
+            if (config.phoneTreeUri.isNotBlank()) prefs[PHONE_TREE] = config.phoneTreeUri.trim()
+            if (config.freeboxHost.isNotBlank()) prefs[FB_HOST] = config.freeboxHost.trim()
+            if (config.freeboxApiBase.isNotBlank()) prefs[FB_BASE] = config.freeboxApiBase.trim()
+            if (config.freeboxApiVersion.isNotBlank()) prefs[FB_VERSION] = config.freeboxApiVersion.trim()
+            if (config.freeboxAppToken.isNotBlank()) prefs[FB_TOKEN] = config.freeboxAppToken.trim()
+            if (config.freeboxDownloadDir.isNotBlank()) prefs[FB_DIR] = config.freeboxDownloadDir.trim()
+            if (config.freeboxLanIp.isNotBlank()) prefs[FB_LAN_IP] = config.freeboxLanIp.trim()
+            if (config.vpnConfig.isNotBlank()) {
+                prefs[VPN_CONFIG] = config.vpnConfig
+                prefs[VPN_LOGIN] = config.vpnLogin.ifBlank { "s3arch" }
+                prefs[VPN_ANSWERED] = true
+            }
+        }
     }
 
     suspend fun setSeedAfterDownload(enabled: Boolean) {
@@ -297,5 +357,7 @@ class SettingsRepository(private val context: Context) {
         val TARGETS_DOWNLOAD = stringSetPreferencesKey("download_targets")
         val PHONE_TREE = stringPreferencesKey("phone_tree_uri")
         val SEED_AFTER = booleanPreferencesKey("seed_after_download")
+        val TMDB_KEY = stringPreferencesKey("tmdb_key")
+        val FILTERS = stringPreferencesKey("search_filters")
     }
 }

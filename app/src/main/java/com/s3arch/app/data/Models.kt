@@ -384,6 +384,10 @@ data class AppSettings(
     val phoneTreeUri: String = "",
     /** Continue a partager le torrent apres le telechargement (consomme batterie). */
     val seedAfterDownload: Boolean = false,
+    /** Cle TMDB facultative : affiches et descriptions dans les resultats. */
+    val tmdbKey: String = "",
+    /** Filtres avances appliques a la liste de resultats. */
+    val filters: SearchFilters = SearchFilters(),
 ) {
 
     val hasPhoneTarget: Boolean get() = TARGET_PHONE in downloadTargets

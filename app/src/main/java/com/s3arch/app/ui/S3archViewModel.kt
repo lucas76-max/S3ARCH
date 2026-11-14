@@ -9,14 +9,19 @@ import com.s3arch.app.BuildConfig
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.s3arch.app.data.AppSettings
+import com.s3arch.app.data.ConfigExport
 import com.s3arch.app.data.FreeboxApi
 import com.s3arch.app.data.FreeboxException
 import com.s3arch.app.data.KeyImport
 import com.s3arch.app.data.PlaybackKeepAlive
 import com.s3arch.app.data.FreeboxTask
 import com.s3arch.app.data.MediaType
+import com.s3arch.app.data.MediaTitle
+import com.s3arch.app.data.SearchFilters
 import com.s3arch.app.data.SettingsRepository
 import com.s3arch.app.data.SortMode
+import com.s3arch.app.data.TmdbClient
+import com.s3arch.app.data.TmdbInfo
 import com.s3arch.app.data.TorrentResult
 import com.s3arch.app.data.TorznabClient
 import com.s3arch.app.data.Tracker
@@ -124,6 +129,8 @@ data class UiState(
     val targetPrompt: DownloadRequest? = null,
     /** Confirmation demandee avant un telechargement de plus de 10 Go. */
     val sizeWarning: DownloadRequest? = null,
+    /** Fiches TMDB deja recuperees, indexees par « tracker:id ». */
+    val tmdb: Map<String, TmdbInfo> = emptyMap(),
 ) {
     /** Vrai quand la box a explicitement refuse le droit utile au VPN. */
     val needsSettingsRight: Boolean get() = freeboxRights?.contains("settings") == false
@@ -137,6 +144,10 @@ class S3archViewModel(app: Application) : AndroidViewModel(app) {
     private val proxy = VlcProxyServer()
     private val updates = UpdateRepository(app)
     private val engine = PhoneEngine.get(app)
+    private val tmdb = TmdbClient()
+
+    /** Resultats deja interroges sur TMDB : evite les requetes en double. */
+    private val tmdbAsked = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
     /** Horodatage de la derniere sauvegarde des telechargements telephone. */
     private var lastPhoneSave = 0L
@@ -250,6 +261,66 @@ class S3archViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { repo.setEnabledTypes(emptySet()) }
     }
 
+    // ------------------------------------------------------------------ filtres avances
+
+    fun saveFilters(filters: SearchFilters) {
+        viewModelScope.launch { repo.saveFilters(filters) }
+    }
+
+    fun resetFilters() {
+        viewModelScope.launch { repo.saveFilters(SearchFilters()) }
+    }
+
+    /** Cle TMDB facultative : vide, aucune requete n'est envoyee. */
+    fun setTmdbKey(value: String) {
+        viewModelScope.launch { repo.setTmdbKey(value) }
+    }
+
+    // ------------------------------------------------------------------ configuration
+
+    fun exportConfig(): String = ConfigExport.encode(_state.value.settings)
+
+    /** Import d'un fichier `S3ARCH_config.json` : seules les sections presentes s'appliquent. */
+    fun importConfig(text: String) {
+        val config = ConfigExport.decode(text)
+        if (config == null) {
+            message("Fichier de configuration illisible")
+            return
+        }
+        viewModelScope.launch {
+            repo.applyConfig(config)
+            engine.setSeeding(_state.value.settings.seedAfterDownload)
+            message("Configuration importée")
+        }
+    }
+
+    // ------------------------------------------------------------------ TMDB
+
+    private fun tmdbKeyOf(result: TorrentResult): String = "${result.trackerId}:${result.id}"
+
+    /** Fiche TMDB deja chargee pour ce resultat, s'il y en a une. */
+    fun tmdbInfoFor(result: TorrentResult): TmdbInfo? = _state.value.tmdb[tmdbKeyOf(result)]
+
+    /**
+     * Recupere les affiches et resumes manquants, **20 resultats au maximum par appel**.
+     * L'ecran rappelle cette methode au fur et a mesure du defilement.
+     */
+    fun requestTmdb(results: List<TorrentResult>) {
+        val apiKey = _state.value.settings.tmdbKey.trim()
+        if (apiKey.isBlank()) return
+        val pending = results.filter { tmdbKeyOf(it) !in tmdbAsked }.take(20)
+        if (pending.isEmpty()) return
+        pending.forEach { tmdbAsked += tmdbKeyOf(it) }
+        viewModelScope.launch {
+            pending.forEach { result ->
+                val title = MediaTitle.normalize(result.title)
+                if (title.isBlank()) return@forEach
+                val info = tmdb.lookup(apiKey, title, MediaTitle.yearOf(result.title)) ?: return@forEach
+                _state.update { it.copy(tmdb = it.tmdb + (tmdbKeyOf(result) to info)) }
+            }
+        }
+    }
+
     fun search(query: String = _state.value.query) {
         val term = query.trim()
         if (term.isBlank()) {
@@ -264,6 +335,8 @@ class S3archViewModel(app: Application) : AndroidViewModel(app) {
         }
 
         viewModelScope.launch {
+            // Nouvelle recherche : les fiches TMDB precedentes ne correspondent plus.
+            tmdbAsked.clear()
             _state.update {
                 it.copy(
                     searching = true,
@@ -271,6 +344,7 @@ class S3archViewModel(app: Application) : AndroidViewModel(app) {
                     trackerErrors = emptyMap(),
                     searchProgress = 0f,
                     searchTotal = sources.size,
+                    tmdb = emptyMap(),
                 )
             }
             // Chaque tracker qui repond fait avancer la barre, meme s'il ne renvoie
