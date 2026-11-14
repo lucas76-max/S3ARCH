@@ -104,9 +104,11 @@ enum class AudioCodec(
     MP3("mp3", "MP3", "Audio compressé MP3", Regex("\\bmp3\\b", RegexOption.IGNORE_CASE)),
     OPUS("opus", "Opus", "Audio compressé Opus", Regex("\\bopus\\b", RegexOption.IGNORE_CASE)),
     ATMOS("atmos", "Atmos", "Dolby Atmos (objet audio)", Regex("\\batmos\\b", RegexOption.IGNORE_CASE)),
-    CH_5_1("5.1", "5.1", "Six canaux (5 enceintes + caisson)", Regex("\\b5[._]1\\b")),
-    CH_7_1("7.1", "7.1", "Huit canaux (7 enceintes + caisson)", Regex("\\b7[._]1\\b")),
-    CH_2_0("2.0", "2.0", "Stéréo deux canaux", Regex("\\b2[._]0\\b"));
+    // Les canaux sont souvent colles au codec (« DDP5.1 », « AC3.5.1 ») : une limite
+    // de mot ne suffit pas, il faut seulement exclure un chiffre voisin.
+    CH_5_1("5.1", "5.1", "Six canaux (5 enceintes + caisson)", Regex("(?<![0-9])5[._]1(?![0-9])")),
+    CH_7_1("7.1", "7.1", "Huit canaux (7 enceintes + caisson)", Regex("(?<![0-9])7[._]1(?![0-9])")),
+    CH_2_0("2.0", "2.0", "Stéréo deux canaux", Regex("(?<![0-9])2[._]0(?![0-9])"));
 
     fun matches(text: String): Boolean = pattern.containsMatchIn(text)
     fun matchesToken(token: String): Boolean = pattern.matches(token)

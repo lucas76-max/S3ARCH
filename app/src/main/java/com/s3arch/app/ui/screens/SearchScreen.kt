@@ -571,7 +571,7 @@ private fun PosterThumb(info: TmdbInfo?, modifier: Modifier = Modifier) {
         if (url != null) {
             AsyncImage(
                 model = url,
-                contentDescription = info.title,
+                contentDescription = info.displayTitle,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize(),
             )
@@ -620,13 +620,13 @@ private fun ResultCard(
             Spacer(Modifier.size(12.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = info?.title?.takeIf { it.isNotBlank() } ?: result.title,
+                    text = info?.displayTitle?.takeIf { it.isNotBlank() } ?: result.title,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
-                if (info != null && info.title.isNotBlank() && info.title != result.title) {
+                if (info != null && info.displayTitle.isNotBlank() && info.displayTitle != result.title) {
                     Text(
                         text = result.title,
                         style = MaterialTheme.typography.labelSmall,
@@ -730,7 +730,7 @@ private fun ResultDetailsDialog(
                             if (url != null) {
                                 AsyncImage(
                                     model = url,
-                                    contentDescription = info?.title,
+                                    contentDescription = info?.displayTitle,
                                     contentScale = ContentScale.Crop,
                                     modifier = Modifier.fillMaxSize(),
                                 )
@@ -750,7 +750,7 @@ private fun ResultDetailsDialog(
                             verticalArrangement = Arrangement.spacedBy(10.dp),
                         ) {
                             Text(
-                                info?.title?.takeIf { it.isNotBlank() } ?: result.title,
+                                info?.displayTitle?.takeIf { it.isNotBlank() } ?: result.title,
                                 style = MaterialTheme.typography.headlineSmall,
                                 fontWeight = FontWeight.Bold,
                             )
@@ -761,9 +761,9 @@ private fun ResultDetailsDialog(
                                 if (info != null && info.year.isNotBlank()) {
                                     Pill(text = info.year, tint = MaterialTheme.colorScheme.primary)
                                 }
-                                if (info != null && info.voteAverage > 0.0) {
+                                if (info != null && info.rating > 0.0) {
                                     Pill(
-                                        text = "%.1f/10".format(Locale.FRANCE, info.voteAverage),
+                                        text = "%.1f/10".format(Locale.FRANCE, info.rating),
                                         tint = MaterialTheme.colorScheme.tertiary,
                                     )
                                 }
@@ -772,9 +772,9 @@ private fun ResultDetailsDialog(
                                     tint = MaterialTheme.colorScheme.secondary,
                                 )
                             }
-                            if (info != null && info.overview.isNotBlank()) {
+                            if (info != null && info.displayOverview.isNotBlank()) {
                                 Text(
-                                    info.overview,
+                                    info.displayOverview,
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = MaterialTheme.colorScheme.onSurface,
                                 )

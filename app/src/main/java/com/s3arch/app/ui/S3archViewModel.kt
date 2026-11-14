@@ -312,11 +312,22 @@ class S3archViewModel(app: Application) : AndroidViewModel(app) {
         if (pending.isEmpty()) return
         pending.forEach { tmdbAsked += tmdbKeyOf(it) }
         viewModelScope.launch {
+            // Aucune erreur TMDB ne doit remonter : une affiche manquante n'est pas
+            // une raison d'interrompre la liste de resultats.
             pending.forEach { result ->
-                val title = MediaTitle.normalize(result.title)
-                if (title.isBlank()) return@forEach
-                val info = tmdb.lookup(apiKey, title, MediaTitle.yearOf(result.title)) ?: return@forEach
-                _state.update { it.copy(tmdb = it.tmdb + (tmdbKeyOf(result) to info)) }
+                try {
+                    val title = MediaTitle.normalize(result.title)
+                    if (title.isNotBlank()) {
+                        val info = tmdb.lookup(apiKey, title, MediaTitle.yearOf(result.title))
+                        if (info != null) {
+                            _state.update { it.copy(tmdb = it.tmdb + (tmdbKeyOf(result) to info)) }
+                        }
+                    }
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    AppLog.warn("TMDB", "Fiche ignorée : ${e.message ?: e.javaClass.simpleName}")
+                }
             }
         }
     }
