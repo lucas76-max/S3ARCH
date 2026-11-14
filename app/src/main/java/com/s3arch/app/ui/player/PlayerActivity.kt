@@ -24,6 +24,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ErrorOutline
+import androidx.compose.material.icons.rounded.Fullscreen
+import androidx.compose.material.icons.rounded.FullscreenExit
 import androidx.compose.material.icons.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.Button
@@ -49,6 +51,9 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
@@ -106,6 +111,8 @@ private fun PlayerScreen(url: String, title: String, onClose: () -> Unit) {
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var attempt by remember { mutableIntStateOf(0) }
     var status by remember { mutableStateOf("Ouverture du flux…") }
+    // Plein ecran : les barres systeme disparaissent, la barre de titre aussi.
+    var fullscreen by remember { mutableStateOf(false) }
 
     val exoPlayer = remember(attempt) {
         ExoPlayer.Builder(context).build().apply {
@@ -147,6 +154,29 @@ private fun PlayerScreen(url: String, title: String, onClose: () -> Unit) {
         onDispose { view.keepScreenOn = false }
     }
 
+    // Immersion totale : un glissement depuis le bord fait reapparaitre les barres.
+    val activity = context as? android.app.Activity
+    DisposableEffect(fullscreen) {
+        val window = activity?.window
+        if (window != null) {
+            val controller = WindowCompat.getInsetsController(window, view)
+            if (fullscreen) {
+                controller.systemBarsBehavior =
+                    WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                controller.hide(WindowInsetsCompat.Type.systemBars())
+            } else {
+                controller.show(WindowInsetsCompat.Type.systemBars())
+            }
+        }
+        onDispose {
+            // En quittant le lecteur, les barres du telephone reviennent toujours.
+            if (fullscreen && window != null) {
+                WindowCompat.getInsetsController(window, view)
+                    .show(WindowInsetsCompat.Type.systemBars())
+            }
+        }
+    }
+
     BackHandler { onClose() }
 
     Box(
@@ -166,6 +196,7 @@ private fun PlayerScreen(url: String, title: String, onClose: () -> Unit) {
             },
         )
 
+        if (!fullscreen) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -192,8 +223,30 @@ private fun PlayerScreen(url: String, title: String, onClose: () -> Unit) {
                     color = Color.White.copy(alpha = 0.7f),
                 )
             }
+            IconButton(onClick = { fullscreen = true }) {
+                Icon(
+                    Icons.Rounded.Fullscreen,
+                    contentDescription = "Lire en plein écran",
+                    tint = Color.White,
+                )
+            }
             IconButton(onClick = onClose) {
                 Icon(Icons.Rounded.Close, contentDescription = "Fermer", tint = Color.White)
+            }
+        }
+        } else {
+            IconButton(
+                onClick = { fullscreen = false },
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .statusBarsPadding()
+                    .padding(8.dp),
+            ) {
+                Icon(
+                    Icons.Rounded.FullscreenExit,
+                    contentDescription = "Quitter le plein écran",
+                    tint = Color.White.copy(alpha = 0.8f),
+                )
             }
         }
 

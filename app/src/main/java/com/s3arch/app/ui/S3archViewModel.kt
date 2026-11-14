@@ -9,6 +9,7 @@ import com.s3arch.app.BuildConfig
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.s3arch.app.data.AppSettings
+import com.s3arch.app.data.BottomBarStyle
 import com.s3arch.app.data.ConfigExport
 import com.s3arch.app.data.FreeboxApi
 import com.s3arch.app.data.FreeboxException
@@ -20,6 +21,7 @@ import com.s3arch.app.data.MediaTitle
 import com.s3arch.app.data.SearchFilters
 import com.s3arch.app.data.SettingsRepository
 import com.s3arch.app.data.SortMode
+import com.s3arch.app.data.ThemeMode
 import com.s3arch.app.data.TmdbClient
 import com.s3arch.app.data.TmdbInfo
 import com.s3arch.app.data.TorrentResult
@@ -239,6 +241,16 @@ class S3archViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setAccentColor(id: String) {
         viewModelScope.launch { repo.setAccentColor(id) }
+    }
+
+    /** Fond de l'application (systeme, clair, sombre, AMOLED). */
+    fun setThemeMode(mode: ThemeMode) {
+        viewModelScope.launch { repo.setThemeMode(mode) }
+    }
+
+    /** Barre du bas : pastille flottante ou barre classique. */
+    fun setBottomBarStyle(style: BottomBarStyle) {
+        viewModelScope.launch { repo.setBottomBarStyle(style) }
     }
 
     fun setEnabledTrackers(ids: Set<String>) {

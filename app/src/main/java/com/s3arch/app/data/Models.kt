@@ -334,6 +334,28 @@ data class TrackedDownload(
     val seeders: Int = 0,
 )
 
+/** Fond de l'application : suivi du systeme, clair, sombre ou AMOLED (noir pur). */
+enum class ThemeMode(val id: String, val label: String) {
+    SYSTEM("system", "Système"),
+    LIGHT("light", "Clair"),
+    DARK("dark", "Sombre"),
+    AMOLED("amoled", "AMOLED");
+
+    companion object {
+        fun fromId(id: String?): ThemeMode = entries.firstOrNull { it.id == id } ?: SYSTEM
+    }
+}
+
+/** Barre du bas : pastille flottante (par defaut) ou ancienne barre pleine largeur. */
+enum class BottomBarStyle(val id: String, val label: String) {
+    PILL("pill", "Pastille flottante"),
+    CLASSIC("classic", "Barre classique");
+
+    companion object {
+        fun fromId(id: String?): BottomBarStyle = entries.firstOrNull { it.id == id } ?: PILL
+    }
+}
+
 /** Reglages persistants de l'application. */
 data class AppSettings(
     val c411Key: String = "",
@@ -388,6 +410,10 @@ data class AppSettings(
     val tmdbKey: String = "",
     /** Filtres avances appliques a la liste de resultats. */
     val filters: SearchFilters = SearchFilters(),
+    /** Fond : systeme, clair, sombre ou AMOLED. */
+    val themeMode: ThemeMode = ThemeMode.SYSTEM,
+    /** Barre du bas : pastille flottante ou barre classique. */
+    val bottomBarStyle: BottomBarStyle = BottomBarStyle.PILL,
 ) {
 
     val hasPhoneTarget: Boolean get() = TARGET_PHONE in downloadTargets

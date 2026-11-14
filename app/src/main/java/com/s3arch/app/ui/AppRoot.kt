@@ -1,11 +1,13 @@
 package com.s3arch.app.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Search
@@ -37,11 +39,15 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.s3arch.app.data.BottomBarStyle
 import com.s3arch.app.data.TARGET_FREEBOX
 import com.s3arch.app.data.TARGET_PHONE
+import com.s3arch.app.data.ThemeMode
 import com.s3arch.app.ui.components.DownloadTargetDialog
+import com.s3arch.app.ui.components.FloatingPillBar
 import com.s3arch.app.ui.components.LargeDownloadDialog
 import com.s3arch.app.ui.components.LogoMark
+import com.s3arch.app.ui.components.PillTab
 import com.s3arch.app.ui.components.UpdateBanner
 import com.s3arch.app.ui.components.UpdateDialog
 import com.s3arch.app.ui.components.VpnConsentEffect
@@ -85,9 +91,16 @@ fun AppRoot(vm: S3archViewModel) {
         }
     }
 
+    val themeMode = state.settings.themeMode
     S3ARCHTheme(
+        darkTheme = when (themeMode) {
+            ThemeMode.LIGHT -> false
+            ThemeMode.DARK, ThemeMode.AMOLED -> true
+            ThemeMode.SYSTEM -> isSystemInDarkTheme()
+        },
         dynamicColor = state.settings.dynamicColor,
         accentColor = state.settings.accentColor,
+        amoled = themeMode == ThemeMode.AMOLED,
     ) {
         VpnConsentEffect(state, vm)
         DownloadTargetDialog(
@@ -122,6 +135,7 @@ private fun MainScaffold(
 ) {
     var tab by rememberSaveable { mutableStateOf(0) }
     val activeDownloads = state.tasks.values.count { !it.isDone && !it.isError }
+    val libraryLabel = if (activeDownloads > 0) "Bibliothèque ($activeDownloads)" else "Bibliothèque"
     val context = LocalContext.current
 
     UpdateDialog(
@@ -137,12 +151,24 @@ private fun MainScaffold(
         containerColor = MaterialTheme.colorScheme.background,
         snackbarHost = { SnackbarHost(snackbarHostState) },
         bottomBar = {
-            Column {
+            Column(modifier = Modifier.navigationBarsPadding()) {
                 UpdateBanner(
                     update = state.update,
                     onIgnore = { vm.ignoreUpdate() },
                     onOpen = { vm.openUpdateDetails() },
                 )
+                if (state.settings.bottomBarStyle == BottomBarStyle.PILL) {
+                    FloatingPillBar(
+                        tabs = listOf(
+                            PillTab("Recherche", Icons.Rounded.Search),
+                            PillTab(libraryLabel, Icons.Rounded.VideoLibrary),
+                            PillTab("Réglages", Icons.Rounded.Settings),
+                        ),
+                        selected = tab,
+                        onSelect = { tab = it },
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
+                    )
+                } else {
                 NavigationBar(
                     containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
                     tonalElevation = 0.dp,
@@ -163,9 +189,7 @@ private fun MainScaffold(
                     selected = tab == 1,
                     onClick = { tab = 1 },
                     icon = { Icon(Icons.Rounded.VideoLibrary, contentDescription = null) },
-                    label = {
-                        Text(if (activeDownloads > 0) "Bibliothèque ($activeDownloads)" else "Bibliothèque")
-                    },
+                    label = { Text(libraryLabel) },
                     colors = NavigationBarItemDefaults.colors(
                         selectedIconColor = MaterialTheme.colorScheme.primary,
                         selectedTextColor = MaterialTheme.colorScheme.primary,
@@ -183,6 +207,7 @@ private fun MainScaffold(
                         indicatorColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.16f),
                     ),
                 )
+                }
                 }
             }
         },

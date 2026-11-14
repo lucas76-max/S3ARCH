@@ -71,7 +71,19 @@ class SettingsRepository(private val context: Context) {
             // valeur par defaut, rien n'est efface.
             tmdbKey = prefs[TMDB_KEY] ?: "",
             filters = SearchFilterCodec.decode(prefs[FILTERS]),
+            themeMode = ThemeMode.fromId(prefs[THEME_MODE]),
+            bottomBarStyle = BottomBarStyle.fromId(prefs[BOTTOM_BAR]),
         )
+    }
+
+    /** Fond choisi dans la page Theme. */
+    suspend fun setThemeMode(mode: ThemeMode) {
+        context.dataStore.edit { it[THEME_MODE] = mode.id }
+    }
+
+    /** Barre de navigation : pastille flottante ou barre classique. */
+    suspend fun setBottomBarStyle(style: BottomBarStyle) {
+        context.dataStore.edit { it[BOTTOM_BAR] = style.id }
     }
 
     /** Cle TMDB facultative (affiches et descriptions). */
@@ -110,6 +122,8 @@ class SettingsRepository(private val context: Context) {
             prefs[HIDE_ZERO_SEEDERS] = config.hideZeroSeeders
             prefs[DYNAMIC_COLOR] = config.dynamicColor
             prefs[ACCENT_COLOR] = config.accentColor
+            prefs[THEME_MODE] = ThemeMode.fromId(config.themeMode).id
+            prefs[BOTTOM_BAR] = BottomBarStyle.fromId(config.bottomBarStyle).id
             val targets = config.downloadTargets
                 .filter { it == TARGET_PHONE || it == TARGET_FREEBOX }
                 .toSet()
@@ -359,5 +373,7 @@ class SettingsRepository(private val context: Context) {
         val SEED_AFTER = booleanPreferencesKey("seed_after_download")
         val TMDB_KEY = stringPreferencesKey("tmdb_key")
         val FILTERS = stringPreferencesKey("search_filters")
+        val THEME_MODE = stringPreferencesKey("theme_mode")
+        val BOTTOM_BAR = stringPreferencesKey("bottom_bar_style")
     }
 }

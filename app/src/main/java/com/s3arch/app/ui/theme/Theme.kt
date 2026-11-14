@@ -148,6 +148,18 @@ private val DarkColors = darkColorScheme(
     scrim = Color(0xFF000000),
 )
 
+// Variante AMOLED : fond et surfaces noirs, les cartes se detachent par leurs bordures.
+private val AmoledColors = DarkColors.copy(
+    background = Color(0xFF000000),
+    surface = Color(0xFF000000),
+    surfaceContainerLowest = Color(0xFF000000),
+    surfaceContainerLow = Color(0xFF050608),
+    surfaceContainer = Color(0xFF0A0B0E),
+    surfaceContainerHigh = Color(0xFF101216),
+    surfaceContainerHighest = Color(0xFF181B20),
+    outlineVariant = Color(0xFF23262F),
+)
+
 private val LightColors = lightColorScheme(
     primary = Color(0xFF00639B),
     onPrimary = Color(0xFFFFFFFF),
@@ -211,11 +223,14 @@ fun S3ARCHTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
     dynamicColor: Boolean = true,
     accentColor: String = "azure",
+    /** Fond noir pur : prioritaire sur les couleurs dynamiques. */
+    amoled: Boolean = false,
     content: @Composable () -> Unit,
 ) {
     val context = LocalContext.current
     val palette = accentPalette(accentColor)
     val colors = when {
+        amoled -> AmoledColors.withAccent(palette, dark = true)
         dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && darkTheme ->
             dynamicDarkColorScheme(context)
         dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ->

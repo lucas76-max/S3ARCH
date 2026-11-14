@@ -73,6 +73,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.s3arch.app.BuildConfig
 import com.s3arch.app.data.ConfigExport
+import com.s3arch.app.data.BottomBarStyle
+import com.s3arch.app.data.ThemeMode
 import com.s3arch.app.data.MediaType
 import com.s3arch.app.data.Tracker
 import com.s3arch.app.data.TrackerSource
@@ -90,6 +92,7 @@ import com.s3arch.app.ui.components.ScreenHeader
 import com.s3arch.app.ui.components.SearchFiltersDialog
 import com.s3arch.app.ui.components.SectionCard
 import com.s3arch.app.ui.components.StatusDot
+import com.s3arch.app.ui.components.ThemeChoiceRow
 import com.s3arch.app.ui.components.TrackerChoice
 import com.s3arch.app.ui.components.TrackerKeyEditor
 import com.s3arch.app.ui.components.VpnSettingsContent
@@ -290,6 +293,7 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
             ) {
                 listOf(
                     "general" to "Général",
+                    "theme" to "Thème",
                     "freebox" to "Freebox",
                     "phone" to "Téléphone",
                 ).forEach { (id, label) ->
@@ -313,6 +317,7 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
                         when (page) {
                             "freebox" -> "Freebox : autorisation, dossier, VPN"
                             "phone" -> "Téléphone : dossier, batterie, partage"
+                            "theme" -> "Thème : barre, couleur d'accent et fond"
                             else -> "Clés API, filtres et configuration"
                         },
                         style = MaterialTheme.typography.bodyMedium,
@@ -766,7 +771,12 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
         }
         }
 
-        if (show("apparence apparence couleurs dynamiques material you accent palette theme", "general")) {
+        if (show(
+                "apparence couleurs dynamiques material you accent palette theme thème fond sombre clair " +
+                    "amoled noir barre navigation pastille flottante classique",
+                "theme",
+            )
+        ) {
         item {
             val dynamicSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
             val dynamicActive = dynamicSupported && state.settings.dynamicColor
@@ -781,6 +791,18 @@ fun SettingsScreen(state: UiState, vm: S3archViewModel) {
                 },
             ) {
                 Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    ThemeChoiceRow(
+                        title = "Barre de navigation",
+                        options = BottomBarStyle.entries.map { it.id to it.label },
+                        selectedId = state.settings.bottomBarStyle.id,
+                        onSelect = { vm.setBottomBarStyle(BottomBarStyle.fromId(it)) },
+                    )
+                    ThemeChoiceRow(
+                        title = "Fond",
+                        options = ThemeMode.entries.map { it.id to it.label },
+                        selectedId = state.settings.themeMode.id,
+                        onSelect = { vm.setThemeMode(ThemeMode.fromId(it)) },
+                    )
                     // Toute la ligne réagit au clic : un appui sur le libellé ou l'icône
                     // bascule le mode, au lieu de viser l'interrupteur seul.
                     Row(
